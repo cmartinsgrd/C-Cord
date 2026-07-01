@@ -1,6 +1,4 @@
 1:admin:admin123:ADMIN:ACTIVE
 2:user1:pass123:USER:ACTIVE
-3:jucimar:jucimar123:USER:ACTIVE
-4:sala:sala123:USER:ACTIVE
-5:joao:senha123:USER:PENDING
-6:testuser:testpass:USER:PENDING
+3:jucimar:jucimar123:USER:INACTIVE
+6:testuser:testpass:USER:INACTIVE

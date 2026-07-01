@@ -365,7 +365,7 @@ void list_all(char *response) {
     fclose(f);
 
     char footer[64];
-    sprintf(footer, "-----\n Total: %d registo(s)\n", total);
+    sprintf(footer, "-----\n Total: %d registo(s)", total);
     strncat(response, footer, BUF_SIZE - strlen(response) - 1);
 }
 
@@ -514,8 +514,10 @@ void register_user(const char *username, const char *password, char *response) {
     if (f) {
         char line[256], id[10], u[50];
         while (fgets(line, sizeof(line), f)) {
-            if (sscanf(line, "%9[^:]:%49[^:]", id, u) >= 2) {
-                if (strcmp(u, username) == 0) {
+            if (sscanf(line, "%9[^:]:%49[^:]", id, u) >= 2) 
+            {
+                if (strcmp(u, username) == 0) 
+                {
                     fclose(f);
                     strcpy(response, "REGISTER_FAIL: Utilizador ja existe.");
                     return;

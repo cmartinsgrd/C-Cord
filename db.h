@@ -27,6 +27,7 @@ int  proximo_id(void);
 /* tipo de retorno de check_auth: 1=OK, -1=PENDING, -2=INACTIVE, 0=FAIL */
 int  check_auth(const char *username, const char *password, char *role);
 int  is_admin(const char *username);
+int  obter_id_por_username(const char *username);
 
 void list_all(char *response);
 void list_pending(char *response);

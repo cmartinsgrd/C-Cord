@@ -44,14 +44,20 @@ int proximo_id(void) {
     return max_id + 1;
 }
 
-int check_auth(const char *username, const char *password, char *role) {
+
+// ========== AUTHENTICATION USER ================================================================================
+int check_auth(const char *username, const char *password, char *role) 
+{
     FILE *f = fopen(USERS_FILE, "r");
-    if (!f) { guardar_log("users.txt nao encontrado!", 3); return 0; }
+    if (!f) { guardar_log("users.txt não encontrado!", 3); return 0; }
 
     char line[256], id[10], u[50], p[50], r[20], s[20];
-    while (fgets(line, sizeof(line), f)) {
-        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
-            if (strcmp(u, username) == 0 && strcmp(p, password) == 0) {
+    while (fgets(line, sizeof(line), f)) 
+    {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) 
+        {
+            if (strcmp(u, username) == 0 && strcmp(p, password) == 0) 
+            {
                 fclose(f);
                 if (strcmp(s, "PENDING")  == 0) return -1;
                 if (strcmp(s, "INACTIVE") == 0) return -2;
@@ -64,14 +70,18 @@ int check_auth(const char *username, const char *password, char *role) {
     return 0;
 }
 
-int is_admin(const char *username) {
+
+// ========== IS ADMIN USER ================================================================================
+int is_admin(const char *username) 
+{
     FILE *f = fopen(USERS_FILE, "r");
     if (!f) return 0;
     char line[256], id[10], u[50], p[50], r[20], s[20];
     while (fgets(line, sizeof(line), f)) {
-        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
-            if (strcmp(u, username) == 0 && strcmp(r, "ADMIN") == 0 &&
-                strcmp(s, "ACTIVE") == 0) {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) 
+        {
+            if (strcmp(u, username) == 0 && strcmp(r, "ADMIN") == 0 && strcmp(s, "ACTIVE") == 0) 
+            {
                 fclose(f);
                 return 1;
             }
@@ -81,9 +91,38 @@ int is_admin(const char *username) {
     return 0;
 }
 
-void list_all(char *response) {
+/* ============================================================================
+ * FUNÇÃO: obter_id_por_username()
+ * ============================================================================
+ *
+ * Devolve o ID (inteiro) do utilizador com o username dado, ou -1 se não
+ * encontrado. Usado nas verificações de "não podes agir sobre a tua
+ * própria conta" em approve_user/suspend_user/delete_user, agora que o
+ * alvo dessas operações é identificado por ID e não por username.
+ * ============================================================================
+ */
+int obter_id_por_username(const char *username) {
     FILE *f = fopen(USERS_FILE, "r");
-    if (!f) { strcpy(response, "ERRO: Ficheiro de utilizadores nao encontrado."); return; }
+    if (!f) return -1;
+    char line[256], id[10], u[50], p[50], r[20], s[20];
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
+            if (strcmp(u, username) == 0) {
+                fclose(f);
+                return atoi(id);
+            }
+        }
+    }
+    fclose(f);
+    return -1;
+}
+
+
+// ========== LIST ALL USERS ================================================================================
+void list_all(char *response) 
+{
+    FILE *f = fopen(USERS_FILE, "r");
+    if (!f) { strcpy(response, "ERRO: Ficheiro de utilizadores não encontrado."); return; }
 
     strcpy(response,
            "=== UTILIZADORES REGISTADOS ===\n"
@@ -94,7 +133,8 @@ void list_all(char *response) {
     int  total = 0;
 
     while (fgets(line, sizeof(line), f)) {
-        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) 
+        {
             char entry[128];
             sprintf(entry, " %-3s | %-16s | %-7s | %s\n", id, u, r, s);
             strncat(response, entry, BUF_SIZE - strlen(response) - 1);
@@ -103,14 +143,17 @@ void list_all(char *response) {
     }
     fclose(f);
 
-    char footer[64];
-    sprintf(footer, "-----\n Total: %d registo(s)\n", total);
+    char footer[128];
+    sprintf(footer, "---------------------------------------------\n Total: %d registo(s)\n", total);
     strncat(response, footer, BUF_SIZE - strlen(response) - 1);
 }
 
+
+
+// ========== LIST PENDING USERS ================================================================================
 void list_pending(char *response) {
     FILE *f = fopen(USERS_FILE, "r");
-    if (!f) { strcpy(response, "ERRO: Ficheiro nao encontrado."); return; }
+    if (!f) { strcpy(response, "ERRO: Ficheiro não encontrado."); return; }
 
     strcpy(response,
            "=== UTILIZADORES PENDENTES ===\n"
@@ -142,54 +185,10 @@ void list_pending(char *response) {
     }
 }
 
-void check_inbox(const char *username, char *response) {
-    FILE *f = fopen(INBOX_FILE, "r");
-    if (!f) { strcpy(response, "A sua caixa de entrada esta vazia."); return; }
 
-    sprintf(response, "=== CAIXA DE ENTRADA DE %s ===\n", username);
-    char line[512], dest[50], from[50], msg[400];
-    int  count = 0;
 
-    while (fgets(line, sizeof(line), f)) {
-        line[strcspn(line, "\n")] = 0;
-        if (sscanf(line, "%49[^:]:%49[^:]:%399[^\n]", dest, from, msg) == 3) {
-            if (strcmp(dest, username) == 0) {
-                char entry[512];
-                sprintf(entry, " [%d] De: %s -> %s\n", ++count, from, msg);
-                strncat(response, entry, BUF_SIZE - strlen(response) - 1);
-            }
-        }
-    }
-    fclose(f);
 
-    if (count == 0)
-        strncat(response, " (sem mensagens novas)\n",
-                BUF_SIZE - strlen(response) - 1);
-}
 
-void send_msg(const char *dest, const char *from, const char *msg, char *response) {
-    FILE *f = fopen(USERS_FILE, "r");
-    int   found = 0;
-    if (f) {
-        char line[256], id[10], u[50], p[50], r[20], s[20];
-        while (fgets(line, sizeof(line), f)) {
-            if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
-                if (strcmp(u, dest) == 0) { found = 1; break; }
-            }
-        }
-        fclose(f);
-    }
-    if (!found) {
-        sprintf(response, "MSG_FAIL: Utilizador '%s' nao encontrado.", dest);
-        return;
-    }
-
-    f = fopen(INBOX_FILE, "a");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel guardar mensagem."); return; }
-    fprintf(f, "%s:%s:%s\n", dest, from, msg);
-    fclose(f);
-    sprintf(response, "MSG_SENT: Mensagem entregue na caixa de %s.", dest);
-}
 
 void register_user(const char *username, const char *password, char *response) {
     FILE *f = fopen(USERS_FILE, "r");
@@ -209,144 +208,265 @@ void register_user(const char *username, const char *password, char *response) {
 
     int novo_id = proximo_id();
     f = fopen(USERS_FILE, "a");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel aceder ao ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: não foi possivel aceder ao ficheiro."); return; }
     fprintf(f, "%d:%s:%s:USER:PENDING\n", novo_id, username, password);
     fclose(f);
     sprintf(response,
-            "REGISTER_OK: Utilizador '%s' registado (ID=%d). Aguarda aprovacao do administrador.",
+            "REGISTER_OK: Utilizador '%s' registado (ID: %d). Aguarda aprovação do administrador.",
             username, novo_id);
 }
 
-void approve_user(const char *admin_user, const char *target, char *response) {
+
+// ========== APPROVE USER ================================================================================
+void approve_user(const char *admin_user, const char *target, char *response) 
+{
     if (!is_admin(admin_user)) {
         strcpy(response, "APPROVE_FAIL: Sem permissoes de administrador.");
         return;
     }
 
+    int target_id = atoi(target);
+    if (target_id <= 0) {
+        strcpy(response, "APPROVE_FAIL: ID invalido. Indica um numero (ver coluna ID em LIST_PENDING).");
+        return;
+    }
+
     FILE *f = fopen(USERS_FILE, "r");
-    if (!f) { strcpy(response, "ERRO: Ficheiro nao encontrado."); return; }
+        if (!f) { strcpy(response, "ERRO: Ficheiro não encontrado."); return; }
 
-    char lines[MAX_USERS_FICHEIRO][256];
-    int  count = 0, found = 0;
-    while (fgets(lines[count], sizeof(lines[count]), f) && count < MAX_USERS_FICHEIRO)
-        count++;
-    fclose(f);
+        char lines[MAX_USERS_FICHEIRO][256];
+        int  count = 0, found = 0;
+        char nome_encontrado[50] = "";
+        while (fgets(lines[count], sizeof(lines[count]), f) && count < MAX_USERS_FICHEIRO)
+            count++;
+        fclose(f);
 
-    f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+        f = fopen(USERS_FILE, "w");
+        if (!f) { strcpy(response, "ERRO: Não foi possível actualizar o ficheiro."); return; }
 
-    for (int i = 0; i < count; i++) {
-        char id[10], u[50], p[50], r[20], s[20];
-        lines[i][strcspn(lines[i], "\n")] = 0;
+        for (int i = 0; i < count; i++) {
+            char id[10], u[50], p[50], r[20], s[20];
+            lines[i][strcspn(lines[i], "\n")] = 0;
 
-        if (sscanf(lines[i], "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
-            if (strcmp(u, target) == 0 && strcmp(s, "PENDING") == 0) {
-                fprintf(f, "%s:%s:%s:%s:ACTIVE\n", id, u, p, r);
-                found = 1;
-            } else {
+            if (sscanf(lines[i], "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
+                if (atoi(id) == target_id && strcmp(s, "PENDING") == 0) {
+                    fprintf(f, "%s:%s:%s:%s:ACTIVE\n", id, u, p, r);
+                    found = 1;
+                    strcpy(nome_encontrado, u);
+                } else {
+                    fprintf(f, "%s\n", lines[i]);
+                }
+            } else if (strlen(lines[i]) > 0) {
                 fprintf(f, "%s\n", lines[i]);
             }
-        } else if (strlen(lines[i]) > 0) {
-            fprintf(f, "%s\n", lines[i]);
         }
-    }
-    fclose(f);
+        fclose(f);
 
-    if (found)
-        sprintf(response, "APPROVE_OK: Utilizador '%s' aprovado. Pode agora autenticar.", target);
-    else
-        sprintf(response, "APPROVE_FAIL: Utilizador '%s' nao encontrado ou ja esta activo.", target);
+        if (found)
+            sprintf(response, "APPROVE_OK: Utilizador ID: %d (%s) aprovado. Pode agora autenticar.",
+                    target_id, nome_encontrado);
+        else
+            sprintf(response, "APPROVE_FAIL: ID: %d não encontrado ou ja esta activo.", target_id);
 }
 
-void suspend_user(const char *admin_user, const char *target, char *response) {
+
+// ========== SUSPEND USER ================================================================================
+void suspend_user(const char *admin_user, const char *target, char *response) 
+{
     if (!is_admin(admin_user)) {
         strcpy(response, "SUSPEND_FAIL: Sem permissoes de administrador.");
         return;
     }
-    if (strcmp(admin_user, target) == 0) {
-        strcpy(response, "SUSPEND_FAIL: Nao e possivel suspender a propria conta.");
+
+    int target_id = atoi(target);
+    if (target_id <= 0) 
+    {
+        strcpy(response, "SUSPEND_FAIL: ID invalido. Indica um numero (ver coluna ID em LIST_ALL).");
+        return;
+    }
+    if (obter_id_por_username(admin_user) == target_id) 
+    {
+        strcpy(response, "SUSPEND_FAIL: não e possivel suspender a propria conta.");
         return;
     }
 
     FILE *f = fopen(USERS_FILE, "r");
-    if (!f) { strcpy(response, "ERRO: Ficheiro nao encontrado."); return; }
+    if (!f) { strcpy(response, "ERRO: Ficheiro não encontrado."); return; }
 
     char lines[MAX_USERS_FICHEIRO][256];
     int  count = 0, found = 0;
+    char nome_encontrado[50] = "";  
+
     while (fgets(lines[count], sizeof(lines[count]), f) && count < MAX_USERS_FICHEIRO)
         count++;
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: não foi possivel actualizar ficheiro."); return; }
 
     char novo_estado[20] = "";
     for (int i = 0; i < count; i++) {
         char id[10], u[50], p[50], r[20], s[20];
         lines[i][strcspn(lines[i], "\n")] = 0;
 
-        if (sscanf(lines[i], "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
-            if (strcmp(u, target) == 0 && strcmp(s, "PENDING") != 0) {
+        if (sscanf(lines[i], "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) 
+        {
+            if (atoi(id) == target_id && strcmp(s, "PENDING") != 0) 
+            {
                 const char *ns = (strcmp(s, "ACTIVE") == 0) ? "INACTIVE" : "ACTIVE";
                 fprintf(f, "%s:%s:%s:%s:%s\n", id, u, p, r, ns);
                 strcpy(novo_estado, ns);
                 found = 1;
-            } else {
+                strcpy(nome_encontrado, u);
+            } 
+            else 
+            {
                 fprintf(f, "%s\n", lines[i]);
             }
-        } else if (strlen(lines[i]) > 0) {
+        } 
+        else if (strlen(lines[i]) > 0) 
+        {
             fprintf(f, "%s\n", lines[i]);
         }
     }
     fclose(f);
 
     if (found)
-        sprintf(response, "SUSPEND_OK: Estado de '%s' alterado para %s.", target, novo_estado);
+        sprintf(response, "SUSPEND_OK: Estado de ID: %d (%s) alterado para %s.", target_id, nome_encontrado, novo_estado);
     else
-        sprintf(response, "SUSPEND_FAIL: Utilizador '%s' nao encontrado ou esta PENDING.", target);
+        sprintf(response, "SUSPEND_FAIL: ID: %d não encontrado ou esta PENDING.", target_id);
 }
 
-void delete_user(const char *admin_user, const char *target, char *response) {
-    if (!is_admin(admin_user)) {
+
+// ========== DELETE USER ================================================================================
+void delete_user(const char *admin_user, const char *target, char *response) 
+{
+    if (!is_admin(admin_user)) 
+    {
         strcpy(response, "DELETE_FAIL: Sem permissoes de administrador.");
         return;
     }
-    if (strcmp(admin_user, target) == 0) {
-        strcpy(response, "DELETE_FAIL: Nao e possivel apagar a propria conta de administrador.");
+
+    int target_id = atoi(target);
+    if (target_id <= 0) 
+    {
+        strcpy(response, "DELETE_FAIL: ID invalido. Indica um numero (ver coluna ID em LIST_ALL).");
+        return;
+    }
+
+    if (obter_id_por_username(admin_user) == target_id) 
+    {
+        strcpy(response, "DELETE_FAIL: não e possivel apagar a propria conta de administrador.");
         return;
     }
 
     FILE *f = fopen(USERS_FILE, "r");
-    if (!f) { strcpy(response, "ERRO: Ficheiro nao encontrado."); return; }
+    if (!f) { strcpy(response, "ERRO: Ficheiro não encontrado."); return; }
 
     char lines[MAX_USERS_FICHEIRO][256];
     int  count = 0, found = 0;
-    while (fgets(lines[count], sizeof(lines[count]), f) && count < MAX_USERS_FICHEIRO) {
+    char nome_encontrado[50] = ""; 
+
+    while (fgets(lines[count], sizeof(lines[count]), f) && count < MAX_USERS_FICHEIRO) 
+    {
         lines[count][strcspn(lines[count], "\n")] = 0;
         count++;
     }
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: não foi possivel actualizar ficheiro."); return; }
 
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < count; i++) 
+    {
         char id[10], u[50];
-        if (sscanf(lines[i], "%9[^:]:%49[^:]", id, u) >= 2 && strcmp(u, target) == 0) {
+        if (sscanf(lines[i], "%9[^:]:%49[^:]", id, u) >= 2 && atoi(id) == target_id) 
+        {
             found = 1;
-        } else if (strlen(lines[i]) > 0) {
+            strcpy(nome_encontrado, u); 
+        } 
+        else if (strlen(lines[i]) > 0) 
+        {
             fprintf(f, "%s\n", lines[i]);
         }
     }
     fclose(f);
 
     if (found)
-        sprintf(response, "DELETE_OK: Utilizador '%s' removido do sistema.", target);
+        sprintf(response, "DELETE_OK: Utilizador ID: %d (%s) removido do sistema.", target_id, nome_encontrado);
     else
-        sprintf(response, "DELETE_FAIL: Utilizador '%s' nao encontrado.", target);
+        sprintf(response, "DELETE_FAIL: ID: %d não encontrado.", target_id);
 }
 
-void view_logs(const char *admin_user, char *response) {
+
+
+
+// ========== CHECK INBOX ================================================================================
+void check_inbox(const char *username, char *response) 
+{
+    FILE *f = fopen(INBOX_FILE, "r");
+    if (!f) { strcpy(response, "A sua caixa de entrada esta vazia."); return; }
+
+    sprintf(response, "=== CAIXA DE ENTRADA DE %s ===\n", username);
+    char line[512], dest[50], from[50], msg[400];
+    int  count = 0;
+
+    while (fgets(line, sizeof(line), f)) 
+    {
+        line[strcspn(line, "\n")] = 0;
+        if (sscanf(line, "%49[^:]:%49[^:]:%399[^\n]", dest, from, msg) == 3) 
+        {
+            if (strcmp(dest, username) == 0) 
+            {
+                char entry[512];
+                sprintf(entry, " [%d] De: %s -> %s\n", ++count, from, msg);
+                strncat(response, entry, BUF_SIZE - strlen(response) - 1);
+            }
+        }
+    }
+    fclose(f);
+
+    if (count == 0)
+        strncat(response, " (sem mensagens novas)\n",
+                BUF_SIZE - strlen(response) - 1);
+}
+
+
+
+// ========== SEND MESSAGE ================================================================================
+void send_msg(const char *dest, const char *from, const char *msg, char *response) 
+{
+    FILE *f = fopen(USERS_FILE, "r");
+    int   found = 0;
+    if (f) 
+    {
+        char line[256], id[10], u[50], p[50], r[20], s[20];
+        while (fgets(line, sizeof(line), f)) {
+            if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) 
+            {
+                if (strcmp(u, dest) == 0) { found = 1; break; }
+            }
+        }
+        fclose(f);
+    }
+    if (!found) 
+    {
+        sprintf(response, "MSG_FAIL: Utilizador '%s' não encontrado.", dest);
+        return;
+    }
+
+    f = fopen(INBOX_FILE, "a");
+    if (!f) { strcpy(response, "ERRO: não foi possivel guardar mensagem."); return; }
+    fprintf(f, "%s:%s:%s\n", dest, from, msg);
+    fclose(f);
+    sprintf(response, "MSG_SENT: Mensagem entregue na caixa de %s.", dest);
+}
+
+
+
+// ========== VIEW LOGS ================================================================================
+void view_logs(const char *admin_user, char *response) 
+{
     if (!is_admin(admin_user)) {
         strcpy(response, "LOGS_FAIL: Sem permissoes de administrador.");
         return;
