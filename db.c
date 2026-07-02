@@ -39,21 +39,9 @@ const char *VERSAO_SERVIDOR = "3.0-Etapa3";
 time_t      start_time;
 int         total_pedidos = 0;
 
-void guardar_log(const char *mensagem, int tipo) {
-    FILE *f = fopen(LOG_FILE, "a");
-    if (f) {
-        char    data[64];
-        time_t  agora = time(NULL);
-        struct tm *t  = localtime(&agora);
-        strftime(data, sizeof(data), "%Y-%m-%d %H:%M:%S", t);
-        fprintf(f, "[%s] %s\n", data, mensagem);
-        fclose(f);
-    }
-    if      (tipo == 1) printf(" \033[1;32m[OK]\033[0m    | %s\n", mensagem);
-    else if (tipo == 3) printf(" \033[1;31m[ERRO]\033[0m  | %s\n", mensagem);
-    else                printf(" \033[1;36m[INFO]\033[0m  | %s\n", mensagem);
-    fflush(stdout);
-}
+
+
+
 
 int proximo_id(void) {
     FILE *f = fopen(USERS_FILE, "r");
@@ -68,7 +56,15 @@ int proximo_id(void) {
     return max_id + 1;
 }
 
-int check_auth(const char *username, const char *password, char *role) {
+
+
+/* 
+* =========================================================================================================
+*   USERS AUTHENTICATION
+* =========================================================================================================
+*/
+int check_auth(const char *username, const char *password, char *role) 
+{
     FILE *f = fopen(USERS_FILE, "r");
     if (!f) { guardar_log("users.txt nao encontrado!", 3); return 0; }
 
@@ -76,9 +72,12 @@ int check_auth(const char *username, const char *password, char *role) {
     hash_password(password, hash_recebido);
 
     char line[256], id[10], u[50], p[50], r[20], s[20];
-    while (fgets(line, sizeof(line), f)) {
-        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
-            if (strcmp(u, username) == 0 && strcmp(p, hash_recebido) == 0) {
+    while (fgets(line, sizeof(line), f)) 
+    {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) 
+        {
+            if (strcmp(u, username) == 0 && strcmp(p, hash_recebido) == 0) 
+            {
                 fclose(f);
                 if (strcmp(s, "PENDING")  == 0) return -1;
                 if (strcmp(s, "INACTIVE") == 0) return -2;
@@ -91,7 +90,13 @@ int check_auth(const char *username, const char *password, char *role) {
     return 0;
 }
 
-int is_admin(const char *username) {
+/* 
+* =========================================================================================================
+*   IS ADMIN
+* =========================================================================================================
+*/
+int is_admin(const char *username) 
+{
     FILE *f = fopen(USERS_FILE, "r");
     if (!f) return 0;
     char line[256], id[10], u[50], p[50], r[20], s[20];
@@ -448,4 +453,28 @@ void view_logs(const char *admin_user, char *response) {
     int start = (count > 50) ? count - 50 : 0;
     for (int i = start; i < count; i++)
         strncat(response, buffer[i], BUF_SIZE - strlen(response) - 1);
+}
+
+
+
+
+/* 
+* =========================================================================================================
+*   GUARDAR LOGS
+* =========================================================================================================
+*/
+void guardar_log(const char *mensagem, int tipo) {
+    FILE *f = fopen(LOG_FILE, "a");
+    if (f) {
+        char    data[64];
+        time_t  agora = time(NULL);
+        struct tm *t  = localtime(&agora);
+        strftime(data, sizeof(data), "%Y-%m-%d %H:%M:%S", t);
+        fprintf(f, "[%s] %s\n", data, mensagem);
+        fclose(f);
+    }
+    if      (tipo == 1) printf(" \033[1;32m[OK]\033[0m    | %s\n", mensagem);
+    else if (tipo == 3) printf(" \033[1;31m[ERRO]\033[0m  | %s\n", mensagem);
+    else                printf(" \033[1;36m[INFO]\033[0m  | %s\n", mensagem);
+    fflush(stdout);
 }

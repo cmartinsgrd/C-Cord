@@ -161,7 +161,8 @@ static cliente_t sessao_net;
  *
  * ============================================================================
  */
-void clear_buffer() {
+void clear_buffer() 
+{
     int c;
     while ((c = getchar()) != '\n' && c != EOF);
 }
@@ -191,10 +192,12 @@ void clear_buffer() {
  * em vez de rebentar o programa.
  * ============================================================================
  */
-void ler_password(char *buffer, size_t max_len) {
+void ler_password(char *buffer, size_t max_len) 
+{
     struct termios antigo, novo;
 
-    if (tcgetattr(STDIN_FILENO, &antigo) != 0) {
+    if (tcgetattr(STDIN_FILENO, &antigo) != 0) 
+    {
         /* stdin não é um terminal (pipe/redirecionamento) — sem máscara */
         if (fgets(buffer, (int)max_len, stdin) != NULL)
             buffer[strcspn(buffer, "\n")] = '\0';
@@ -208,13 +211,17 @@ void ler_password(char *buffer, size_t max_len) {
     size_t i = 0;
     int c;
     while (i < max_len - 1 && (c = getchar()) != '\n' && c != EOF) {
-        if (c == 127 || c == 8) {              /* Backspace / Delete */
-            if (i > 0) {
+        if (c == 127 || c == 8) /* Backspace / Delete */
+        {              
+            if (i > 0) 
+            {
                 i--;
                 printf("\b \b");                /* apaga o último '*' no ecrã */
                 fflush(stdout);
             }
-        } else {
+        } 
+        else 
+        {
             buffer[i++] = (char)c;
             printf("*");
             fflush(stdout);
@@ -1215,7 +1222,8 @@ void submenu_canais_user() {
  * ============================================================================
  */
 void menu_utilizador() {
-    while (1) {
+    while (1) 
+    {
         draw_header(1, "Menu Principal");
 
         /* Contar mensagens novas */
@@ -1276,13 +1284,21 @@ void menu_utilizador() {
  * (Etapa 2: F7, F8, etc.). Cada uma oferece controlo sobre o sistema.
  */
 
-void admin_detalhes_servidor() {
+
+ /* 
+* =========================================================================================================
+*   DETALHES SERVIDOR
+* =========================================================================================================
+*/
+void admin_detalhes_servidor() 
+{
     draw_header(2, "Detalhes do Servidor");
     char res[BUF_SIZE];
     call_server("GET_INFO", res);
     printf(" [ESTATÍSTICAS DO SISTEMA]\n");
     char *linha = strtok(res, "\n");
-    while (linha) {
+    while (linha) 
+    {
         printf(" > %s\n", linha);
         linha = strtok(NULL, "\n");
     }
@@ -1290,7 +1306,14 @@ void admin_detalhes_servidor() {
     aguardar_enter();
 }
 
-void admin_echo() {
+
+/* 
+* =========================================================================================================
+*   ECHO AO SERVIDOR
+* =========================================================================================================
+*/
+void admin_echo() 
+{
     draw_header(2, "Testar Latência (ECHO - F4)");
     printf(" [INSTRUÇÕES]\n");
     printf(" Introduza uma mensagem para ser enviada ao servidor.\n");
@@ -1316,8 +1339,16 @@ void admin_echo() {
     }
 }
 
-void admin_gestao_utilizadores() {
-    while (1) {
+
+/* 
+* =========================================================================================================
+*   GESTÃO DE UTILIZADORES
+* =========================================================================================================
+*/
+void admin_gestao_utilizadores() 
+{
+    while (1) 
+    {
         draw_header(2, "Gestão de Utilizadores");
         printf(" [ 1 ] Listar Todos os Utilizadores\n");
         printf(" [ 2 ] Utilizadores Pendentes de Aprovação (F7)\n");
@@ -1331,17 +1362,20 @@ void admin_gestao_utilizadores() {
 
         char res[BUF_SIZE], cmd[200];
 
-        if (opt == 1) {
+        if (opt == 1) 
+        {
             draw_header(2, "Listagem Geral de Utilizadores");
             call_server("LIST_ALL", res);
-            printf(" [BASE DE DADOS LOCAL - users.txt]\n\n");
+            printf(" [BASE DE DADOS LOCAL - users.txt]\n");
             print_server_response(res);
-            printf("\n [ 1 ] Atualizar (Refresh) | [ 0 ] Voltar\n\n Escolha: ");
+            printf("\n [ 1 ] Atualizar (Refresh)\n [ 0 ] Voltar\n\n Escolha: ");
             int o; if (scanf("%d", &o) != 1) o = 0; clear_buffer();
             (void)o;
         }
-        else if (opt == 2) {
-            while (1) {
+        else if (opt == 2) 
+        {
+            while (1) 
+            {
                 draw_header(2, "Utilizadores Pendentes (F7)");
                 call_server("LIST_PENDING", res);
                 print_server_response(res);
@@ -1353,29 +1387,34 @@ void admin_gestao_utilizadores() {
                 if (strcmp(target, "0") == 0) break;
 
                 printf("\n [INFO] Selecionado: %s\n", target);
-                printf(" Ações: [ A ] Aprovar | [ R ] Rejeitar | [ 0 ] Voltar\n Escolha: ");
+                printf(" Ações: [ A ] Aprovar | [ R ] Rejeitar\n [ 0 ] Voltar\n Escolha: ");
                 char acao[5]; scanf("%4s", acao); clear_buffer();
                 if (acao[0] == '0') break;
 
-                if (acao[0] == 'A' || acao[0] == 'a') {
+                if (acao[0] == 'A' || acao[0] == 'a') 
+                {
                     printf("\n +-------------------------------------------------+\n");
                     printf(" | [?] Confirma a APROVAÇÃO do utilizador?         |\n");
                     printf(" |     [ S ] Sim                     [ N ] Não     |\n");
                     printf(" +-------------------------------------------------+\n Resposta: ");
                     char confirm[5]; scanf("%4s", confirm); clear_buffer();
-                    if (confirm[0] == 'S' || confirm[0] == 's') {
+                    if (confirm[0] == 'S' || confirm[0] == 's') 
+                    {
                         sprintf(cmd, "APPROVE_USER %s", target);
                         call_server(cmd, res);
                         printf("\n \033[1;32m[OK]\033[0m %s\n", res);
                         aguardar_enter();
                     }
-                } else if (acao[0] == 'R' || acao[0] == 'r') {
+                } 
+                else if (acao[0] == 'R' || acao[0] == 'r') 
+                {
                     printf("\n +-------------------------------------------------+\n");
                     printf(" | [?] Confirma a REJEIÇÃO do utilizador?          |\n");
                     printf(" |     [ S ] Sim                     [ N ] Não     |\n");
                     printf(" +-------------------------------------------------+\n Resposta: ");
                     char confirm[5]; scanf("%4s", confirm); clear_buffer();
-                    if (confirm[0] == 'S' || confirm[0] == 's') {
+                    if (confirm[0] == 'S' || confirm[0] == 's') 
+                    {
                         sprintf(cmd, "DELETE_USER %s", target);
                         call_server(cmd, res);
                         printf("\n \033[1;32m[OK]\033[0m Utilizador '%s' rejeitado e removido.\n", target);
@@ -1384,7 +1423,8 @@ void admin_gestao_utilizadores() {
                 }
             }
         }
-        else if (opt == 3) {
+        else if (opt == 3) 
+        {
             draw_header(2, "Ativar / Inativar Conta");
             call_server("LIST_ALL", res);
             print_server_response(res);
@@ -1398,13 +1438,15 @@ void admin_gestao_utilizadores() {
             printf(" [ S ] Sim   [ N ] Não\n\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
 
-            if (confirm[0] == 'S' || confirm[0] == 's') {
+            if (confirm[0] == 'S' || confirm[0] == 's') 
+            {
                 printf("\n +-------------------------------------------------+\n");
                 printf(" | [?] Confirma a ALTERAÇÃO do utilizador?         |\n");
                 printf(" |     [ S ] Sim                     [ N ] Não     |\n");
                 printf(" +-------------------------------------------------+\n Resposta: ");
                 char confirm2[5]; scanf("%4s", confirm2); clear_buffer();
-                if (confirm2[0] == 'S' || confirm2[0] == 's') {
+                if (confirm2[0] == 'S' || confirm2[0] == 's') 
+                {
                     sprintf(cmd, "SUSPEND_USER %s", target);
                     call_server(cmd, res);
                     printf("\n \033[1;32m[OK]\033[0m %s\n", res);
@@ -1412,7 +1454,8 @@ void admin_gestao_utilizadores() {
                 }
             }
         }
-        else if (opt == 4) {
+        else if (opt == 4) 
+        {
             draw_header(2, "Remover Utilizador (F8)");
             call_server("LIST_ALL", res);
             print_server_response(res);
@@ -1427,7 +1470,8 @@ void admin_gestao_utilizadores() {
             printf(" +-------------------------------------------------+\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
 
-            if (confirm[0] == 'S' || confirm[0] == 's') {
+            if (confirm[0] == 'S' || confirm[0] == 's') 
+            {
                 printf("\n [!] A modificar base de dados local...\n");
                 sprintf(cmd, "DELETE_USER %s", target);
                 call_server(cmd, res);
@@ -1441,8 +1485,16 @@ void admin_gestao_utilizadores() {
     }
 }
 
-void admin_logs() {
-    while (1) {
+
+/* 
+* =========================================================================================================
+*   LOGS DO ADMIN
+* =========================================================================================================
+*/
+void admin_logs() 
+{
+    while (1) 
+    {
         draw_header(2, "Logs de Atividade");
         char res[BUF_SIZE], cmd[100];
         strcpy(cmd, "VIEW_LOGS");
@@ -1454,7 +1506,8 @@ void admin_logs() {
         int opt; if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }
         clear_buffer();
         if (opt == 0) return;
-        if (opt == 1) {
+        if (opt == 1) 
+        {
             printf("\n \033[1;33m[AVISO]\033[0m Esta operação apaga todos os registos.\n");
             printf(" Confirmar? [ S / N ]: ");
             char c[5]; scanf("%4s", c); clear_buffer();
@@ -1467,15 +1520,22 @@ void admin_logs() {
     }
 }
 
-void admin_canais() {
-    while (1) {
+
+/* 
+* =========================================================================================================
+*   GESTÃO DE CANAIS
+* =========================================================================================================
+*/
+void admin_canais() 
+{
+    while (1) 
+    {
         draw_header(2, "Gestão de Canais (F10)");
         printf(" [ 1 ] Listar Todos os Canais\n");
         printf(" [ 2 ] Criar Novo Canal\n");
         printf(" [ 3 ] Remover Canal\n");
         printf(" [ 4 ] Banir Utilizador de Canal\n");
         printf(" [ 5 ] Ver Atividades de Canais\n");
-        printf("\n----------------------------------------------------\n");
         printf(" [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
         
         int opt;
@@ -1484,7 +1544,8 @@ void admin_canais() {
         
         if (opt == 0) return;
         
-        if (opt == 1) {
+        if (opt == 1) 
+        {
             draw_header(2, "Listagem de Canais");
             printf(" [CANAIS REGISTADOS]\n\n");
             printf(" ID | Nome      | Tipo      | Membros | Proprietário | Estado\n");
@@ -1498,7 +1559,8 @@ void admin_canais() {
             printf(" Total: 5 canais ativos\n");
             aguardar_enter();
         }
-        else if (opt == 2) {
+        else if (opt == 2) 
+        {
             draw_header(2, "Criar Novo Canal");
             char nome[50], tipo[20], descr[200];
             printf(" Nome do canal: "); scanf("%49s", nome); clear_buffer();
@@ -1509,7 +1571,8 @@ void admin_canais() {
             printf(" \033[1;32m[OK]\033[0m Canal '#%s' criado com sucesso!\n", nome);
             aguardar_enter();
         }
-        else if (opt == 3) {
+        else if (opt == 3) 
+        {
             draw_header(2, "Remover Canal");
             printf(" [CANAIS REMOVÍVEIS]\n\n");
             printf(" [ 4 ] #privado   (5 membros, criado por alice)\n");
@@ -1529,12 +1592,14 @@ void admin_canais() {
             printf(" +-------------------------------------------------+\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
             
-            if (confirm[0] == 'S' || confirm[0] == 's') {
+            if (confirm[0] == 'S' || confirm[0] == 's') 
+            {
                 printf("\n \033[1;32m[OK]\033[0m Canal removido permanentemente.\n");
                 aguardar_enter();
             }
         }
-        else if (opt == 4) {
+        else if (opt == 4) 
+        {
             draw_header(2, "Banir Utilizador de Canal");
             printf(" [SELECIONE O CANAL]\n\n");
             printf(" [ 1 ] #geral\n");
@@ -1555,12 +1620,14 @@ void admin_canais() {
             printf(" +-------------------------------------------------+\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
             
-            if (confirm[0] == 'S' || confirm[0] == 's') {
+            if (confirm[0] == 'S' || confirm[0] == 's') 
+            {
                 printf("\n \033[1;32m[OK]\033[0m Utilizador '%s' banido do canal.\n", user);
                 aguardar_enter();
             }
         }
-        else if (opt == 5) {
+        else if (opt == 5) 
+        {
             draw_header(2, "Atividades de Canais");
             printf(" [REGISTOS DE ATIVIDADE]\n\n");
             printf(" [13:24] alice    | #linux   | Enviou mensagem\n");
@@ -1586,8 +1653,10 @@ void admin_canais() {
  * resposta tal como veio, já decifrada por call_server().
  * ============================================================================
  */
-void admin_seguranca() {
-    while (1) {
+void admin_seguranca() 
+{
+    while (1) 
+    {
         draw_header(2, "Painel de Criptografia (F13/F14)");
         printf(" [ALGORITMOS DISPONÍVEIS NESTA SESSÃO]\n\n");
         printf(" F11 Cifra de sessão   : César generalizada (todo o tráfego)\n");
@@ -1600,7 +1669,6 @@ void admin_seguranca() {
         printf(" [ 2 ] Testar Cifra XOR\n");
         printf(" [ 3 ] Testar Cifra RSA (toy)\n");
         printf(" [ 4 ] Calcular Hash de Integridade\n");
-        printf("\n----------------------------------------------------\n");
         printf(" [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
 
         int opt;
@@ -1611,13 +1679,15 @@ void admin_seguranca() {
 
         char res[BUF_SIZE];
 
-        if (opt == 1) {
+        if (opt == 1) 
+        {
             draw_header(2, "Parâmetros Criptográficos (F14)");
             call_server("CRYPTO_INFO", res);
             print_server_response(res);
             aguardar_enter();
         }
-        else if (opt == 2) {
+        else if (opt == 2) 
+        {
             draw_header(2, "Testar Cifra XOR (F13)");
             char texto[400], cmd[450];
             printf(" Texto a cifrar: ");
@@ -1630,7 +1700,8 @@ void admin_seguranca() {
             print_server_response(res);
             aguardar_enter();
         }
-        else if (opt == 3) {
+        else if (opt == 3) 
+        {
             draw_header(2, "Testar Cifra RSA toy (F13)");
             char texto[200], cmd[250];
             printf(" Texto a cifrar (poucos caracteres — RSA toy é lento): ");
@@ -1644,7 +1715,8 @@ void admin_seguranca() {
             print_server_response(res);
             aguardar_enter();
         }
-        else if (opt == 4) {
+        else if (opt == 4) 
+        {
             draw_header(2, "Calcular Hash FNV-1a (F13)");
             char texto[400], cmd[450];
             printf(" Texto para calcular o hash: ");
@@ -1662,8 +1734,16 @@ void admin_seguranca() {
     }
 }
 
-void menu_admin() {
-    while (1) {
+
+/* 
+* =========================================================================================================
+*   ADMIN -> MENU PRINCIPAL
+* =========================================================================================================
+*/
+void menu_admin() 
+{
+    while (1) 
+    {
         draw_header(2, "Menu Principal");
         printf(" [ 1 ] Monitorização: Detalhes do Servidor (F4)\n");
         printf(" [ 2 ] Diagnóstico: Testar Latência (ECHO)\n");
@@ -1679,14 +1759,16 @@ void menu_admin() {
         clear_buffer();
 
         if (opt == 0) { current_user[0] = '\0'; is_admin = 0; exit(0); }
-        if (opt == 9) {
+        if (opt == 9) 
+        {
             char ts[20]; tempo_sessao(ts);
             draw_header(2, "TERMINAR SESSÃO");
             printf(" [?] Tem a certeza que deseja sair da conta?\n");
             printf("     Sessão ativa há %s.\n\n", ts);
             printf(" [ S ] Sim   [ N ] Não\n\n Resposta: ");
             char c[5]; scanf("%4s", c); clear_buffer();
-            if (c[0] == 'S' || c[0] == 's') {
+            if (c[0] == 'S' || c[0] == 's') 
+            {
                 printf("\n \033[1;32m[OK]\033[0m Sessão terminada.\n");
                 current_user[0] = '\0'; is_admin = 0; login_time = 0;
                 SLEEP_SEC(1); return;
@@ -1694,7 +1776,8 @@ void menu_admin() {
             continue;
         }
 
-        switch (opt) {
+        switch (opt) 
+        {
             case 1: admin_detalhes_servidor();    break;
             case 2: admin_echo();                 break;
             case 3: admin_gestao_utilizadores();  break;
@@ -1732,14 +1815,15 @@ void menu_admin() {
  *
  * ============================================================================
  */
-int main(int argc, char *argv[]) {
-
+int main(int argc, char *argv[]) 
+{
     #ifdef _WIN32
     WSADATA wsa;
     WSAStartup(MAKEWORD(2,2), &wsa);
     #endif
 
-    if (argc < 3) {
+    if (argc < 3) 
+    {
         printf("Utilização: ./client_linux <IP_SERVIDOR> <PORTO>\n");
         printf("Exemplo   : ./client_linux 127.0.0.1 10000\n");
         return -1;
@@ -1747,7 +1831,8 @@ int main(int argc, char *argv[]) {
 
     /* Resolução DNS: converter hostname para endereço IP */
     struct hostent *hp = gethostbyname(argv[1]);
-    if (!hp) {
+    if (!hp) 
+    {
         printf("[ERRO] Não foi possível resolver: %s\n", argv[1]);
         return -1;
     }
@@ -1763,7 +1848,8 @@ int main(int argc, char *argv[]) {
      * e a explicação em protocolo.h sobre porque isto mudou face à Etapa 2. */
     system(CLEAR_SCREEN);
     printf("\n A ligar ao servidor no porto %s...\n", argv[2]);
-    if (!conectar_servidor(&addr)) {
+    if (!conectar_servidor(&addr)) 
+    {
         printf("\n \033[1;31m[ERRO CRÍTICO]\033[0m Servidor não encontrado.\n");
         printf(" Verifique se o servidor está em execução.\n\n");
         return -1;
@@ -1772,7 +1858,8 @@ int main(int argc, char *argv[]) {
     SLEEP_SEC(1);
 
     /* LOOP PRINCIPAL */
-    while (1) {
+    while (1) 
+    {
         draw_header(0, "");
         printf(" Selecione uma das seguintes opções:\n");
         printf("----------------------------------------------------\n");
@@ -1783,7 +1870,8 @@ int main(int argc, char *argv[]) {
         int opt; if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }
         clear_buffer();
 
-        if (opt == 0) {
+        if (opt == 0) 
+        {
             draw_header(0, "TERMINAR LIGAÇÃO");
             printf(" [!] A terminar todas as ligações ativas...\n");
             printf(" [!] A limpar memória temporária...\n\n");
@@ -1797,9 +1885,11 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        if (opt == 1) {
+        if (opt == 1) 
+        {
             fluxo_login();
-            if (current_user[0] != '\0') {
+            if (current_user[0] != '\0') 
+            {
                 if (is_admin) menu_admin();
                 else          menu_utilizador();
             }
