@@ -34,6 +34,7 @@ void list_pending(char *response);
 void check_inbox(const char *username, char *response);
 void send_msg(const char *dest, const char *from, const char *msg, char *response);
 void register_user(const char *username, const char *password, char *response);
+void update_password(const char *username, const char *nova_password, char *response);
 void approve_user(const char *admin_user, const char *target, char *response);
 void suspend_user(const char *admin_user, const char *target, char *response);
 void delete_user(const char *admin_user, const char *target, char *response);

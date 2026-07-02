@@ -303,7 +303,7 @@ void draw_header(int modo, const char *subtitulo) {
     printf("====================================================\n");
     if      (modo == 2) printf("         \033[1;31m[!] MODO ADMINISTRADOR ATIVO\033[0m\n");
     else if (modo == 1) printf("         \033[1;36m[~] MODO UTILIZADOR NORMAL\033[0m\n");
-    else                printf("         \033[1;37m[?] BEM-VINDO AO C-CORD (v1.1)\033[0m\n");
+    else                printf("         \033[1;37m[?] BEM-VINDO AO C-CORD (v3.1)\033[0m\n");
 
     /* Imprimir subtítulo se fornecido */
     if (subtitulo && strlen(subtitulo) > 0) {
@@ -816,8 +816,15 @@ void submenu_perfil() {
                 sprintf(cmd, "AUTH %s %s", current_user, p_atual);
                 call_server(cmd, res);
                 if (strncmp(res, "AUTH_SUCCESS", 12) == 0) {
-                    printf("\n \033[1;32m[OK]\033[0m Palavra-passe atualizada com sucesso!\n");
-                    printf(" [!] Por segurança, a sua sessão será mantida.\n");
+                    /* Password atual confirmada: pede ao servidor para gravar a nova */
+                    sprintf(cmd, "CHANGE_PASSWORD %s", p_novo);
+                    call_server(cmd, res);
+                    if (strncmp(res, "PASSWORD_OK", 11) == 0) {
+                        printf("\n \033[1;32m[OK]\033[0m Palavra-passe atualizada com sucesso!\n");
+                        printf(" [!] Por segurança, a sua sessão será mantida.\n");
+                    } else {
+                        printf("\n \033[1;31m[ERRO]\033[0m Não foi possível atualizar a palavra-passe.\n");
+                    }
                 } else {
                     printf("\n \033[1;31m[ERRO]\033[0m Palavra-passe atual incorreta.\n");
                 }
@@ -858,7 +865,7 @@ void submenu_contactos() {
         while (linha != NULL) {
             if (strchr(linha, '|') && !strstr(linha, "ID") && !strstr(linha, "---")) {
                 char u[50] = "", r[20] = "", s[20] = "";
-                if (sscanf(linha, " %*d| %49[^|]| %19[^|]| %19s", u, r, s) >= 1) {
+                if (sscanf(linha, " %*[^|]| %49[^|]| %19[^|]| %19s", u, r, s) >= 1) {
                     char *end = u + strlen(u) - 1;
                     while (end > u && *end == ' ') { *end = '\0'; end--; }
                     if (strcmp(u, current_user) != 0) {

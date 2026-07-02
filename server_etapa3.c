@@ -258,8 +258,16 @@ static void processar_comando(int indice, char *linha)
         delete_user(cli->username, target, resposta);
         sprintf(log_msg, "DELETE_USER: '%s' por '%s'", target, cli->username); log_type = 1;
     }
+    /* ---- CHANGE_PASSWORD <nova_pass>  (username = sessao actual) ---- */
+    else if (strncmp(linha, "CHANGE_PASSWORD ", 16) == 0)
+    {
+        char nova_pass[50] = "";
+        sscanf(linha + 16, "%49s", nova_pass);
+        update_password(cli->username, nova_pass, resposta);
+        sprintf(log_msg, "CHANGE_PASSWORD: '%s' alterou a password", cli->username); log_type = 1;
+    }
     /* ---- VIEW_LOGS ---- */
-    else if (strcmp(linha, "VIEW_LOGS") == 0) 
+    else if (strcmp(linha, "VIEW_LOGS") == 0)
     {
         view_logs(cli->username, resposta);
         log_type = 0;

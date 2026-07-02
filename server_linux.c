@@ -486,7 +486,7 @@ void send_msg(const char *dest, const char *from, const char *msg, char *respons
 
     /* Guardar mensagem em inbox.txt */
     f = fopen(INBOX_FILE, "a");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel guardar mensagem."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível guardar mensagem."); return; }
     fprintf(f, "%s:%s:%s\n", dest, from, msg);
     fclose(f);
     sprintf(response, "MSG_SENT: Mensagem entregue na caixa de %s.", dest);
@@ -530,7 +530,7 @@ void register_user(const char *username, const char *password, char *response) {
     /* Criar novo registo com próximo ID */
     int novo_id = proximo_id();
     f = fopen(USERS_FILE, "a");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel aceder ao ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível aceder ao ficheiro."); return; }
     fprintf(f, "%d:%s:%s:USER:PENDING\n", novo_id, username, password);
     fclose(f);
     sprintf(response,
@@ -568,7 +568,7 @@ void approve_user(const char *admin_user, const char *target, char *response) {
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível actualizar ficheiro."); return; }
 
     for (int i = 0; i < count; i++) {
         char id[10], u[50], p[50], r[20], s[20];
@@ -627,7 +627,7 @@ void suspend_user(const char *admin_user, const char *target, char *response) {
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível actualizar ficheiro."); return; }
 
     char novo_estado[20] = "";
     for (int i = 0; i < count; i++) {
@@ -690,7 +690,7 @@ void delete_user(const char *admin_user, const char *target, char *response) {
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível actualizar ficheiro."); return; }
 
     for (int i = 0; i < count; i++) {
         char id[10], u[50];

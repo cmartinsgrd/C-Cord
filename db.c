@@ -30,7 +30,8 @@
  * do ficheiro, que era a limitação mais óbvia identificada.
  * ============================================================================
  */
-static void hash_password(const char *password, char *hash_hex_out) {
+static void hash_password(const char *password, char *hash_hex_out) 
+{
     unsigned int h = hash_fnv1a(password);
     snprintf(hash_hex_out, 9, "%08x", h);   /* 8 digitos hex + '\0' */
 }
@@ -43,12 +44,14 @@ int         total_pedidos = 0;
 
 
 
-int proximo_id(void) {
+int proximo_id(void) 
+{
     FILE *f = fopen(USERS_FILE, "r");
     if (!f) return 1;
     char line[256];
     int  max_id = 0, id = 0;
-    while (fgets(line, sizeof(line), f)) {
+    while (fgets(line, sizeof(line), f)) 
+    {
         if (sscanf(line, "%d:", &id) == 1 && id > max_id)
             max_id = id;
     }
@@ -139,6 +142,8 @@ int obter_id_por_username(const char *username) {
     return -1;
 }
 
+
+
 void list_all(char *response) {
     FILE *f = fopen(USERS_FILE, "r");
     if (!f) { strcpy(response, "ERRO: Ficheiro de utilizadores nao encontrado."); return; }
@@ -161,12 +166,13 @@ void list_all(char *response) {
     }
     fclose(f);
 
-    char footer[64];
-    sprintf(footer, "-----\n Total: %d registo(s)\n", total);
+    char footer[128];
+    sprintf(footer, "---------------------------------\n Total: %d registo(s)", total);
     strncat(response, footer, BUF_SIZE - strlen(response) - 1);
 }
 
-void list_pending(char *response) {
+void list_pending(char *response) 
+{
     FILE *f = fopen(USERS_FILE, "r");
     if (!f) { strcpy(response, "ERRO: Ficheiro nao encontrado."); return; }
 
@@ -178,9 +184,12 @@ void list_pending(char *response) {
     char line[256], id[10], u[50], p[50], r[20], s[20];
     int  total = 0;
 
-    while (fgets(line, sizeof(line), f)) {
-        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
-            if (strcmp(s, "PENDING") == 0) {
+    while (fgets(line, sizeof(line), f)) 
+    {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) 
+        {
+            if (strcmp(s, "PENDING") == 0) 
+            {
                 char entry[128];
                 sprintf(entry, " %-3s | %-16s | %s\n", id, u, s);
                 strncat(response, entry, BUF_SIZE - strlen(response) - 1);
@@ -193,12 +202,15 @@ void list_pending(char *response) {
     if (total == 0)
         strncat(response, " (sem utilizadores pendentes)\n",
                 BUF_SIZE - strlen(response) - 1);
-    else {
+    else 
+    {
         char footer[64];
         sprintf(footer, "-----\n Total pendentes: %d\n", total);
         strncat(response, footer, BUF_SIZE - strlen(response) - 1);
     }
 }
+
+
 
 void check_inbox(const char *username, char *response) {
     FILE *f = fopen(INBOX_FILE, "r");
@@ -243,7 +255,7 @@ void send_msg(const char *dest, const char *from, const char *msg, char *respons
     }
 
     f = fopen(INBOX_FILE, "a");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel guardar mensagem."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível guardar mensagem."); return; }
     fprintf(f, "%s:%s:%s\n", dest, from, msg);
     fclose(f);
     sprintf(response, "MSG_SENT: Mensagem entregue na caixa de %s.", dest);
@@ -270,12 +282,51 @@ void register_user(const char *username, const char *password, char *response) {
     hash_password(password, hash_pw);
 
     f = fopen(USERS_FILE, "a");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel aceder ao ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível aceder ao ficheiro."); return; }
     fprintf(f, "%d:%s:%s:USER:PENDING\n", novo_id, username, hash_pw);
     fclose(f);
     sprintf(response,
             "REGISTER_OK: Utilizador '%s' registado (ID=%d). Aguarda aprovacao do administrador.",
             username, novo_id);
+}
+
+void update_password(const char *username, const char *nova_password, char *response) {
+    FILE *f = fopen(USERS_FILE, "r");
+    if (!f) { strcpy(response, "ERRO: Ficheiro nao encontrado."); return; }
+
+    char lines[MAX_USERS_FICHEIRO][256];
+    int  count = 0, found = 0;
+    while (fgets(lines[count], sizeof(lines[count]), f) && count < MAX_USERS_FICHEIRO) {
+        lines[count][strcspn(lines[count], "\n")] = 0;
+        count++;
+    }
+    fclose(f);
+
+    f = fopen(USERS_FILE, "w");
+    if (!f) { strcpy(response, "ERRO: Não foi possível actualizar ficheiro."); return; }
+
+    char hash_pw[9];
+    hash_password(nova_password, hash_pw);
+
+    for (int i = 0; i < count; i++) {
+        char id[10], u[50], p[50], r[20], s[20];
+        if (sscanf(lines[i], "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
+            if (strcmp(u, username) == 0) {
+                fprintf(f, "%s:%s:%s:%s:%s\n", id, u, hash_pw, r, s);
+                found = 1;
+            } else {
+                fprintf(f, "%s\n", lines[i]);
+            }
+        } else if (strlen(lines[i]) > 0) {
+            fprintf(f, "%s\n", lines[i]);
+        }
+    }
+    fclose(f);
+
+    if (found)
+        strcpy(response, "PASSWORD_OK: Palavra-passe atualizada com sucesso.");
+    else
+        strcpy(response, "PASSWORD_FAIL: Utilizador nao encontrado.");
 }
 
 void approve_user(const char *admin_user, const char *target, char *response) {
@@ -301,7 +352,7 @@ void approve_user(const char *admin_user, const char *target, char *response) {
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível actualizar ficheiro."); return; }
 
     for (int i = 0; i < count; i++) {
         char id[10], u[50], p[50], r[20], s[20];
@@ -355,7 +406,7 @@ void suspend_user(const char *admin_user, const char *target, char *response) {
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível actualizar ficheiro."); return; }
 
     char novo_estado[20] = "";
     for (int i = 0; i < count; i++) {
@@ -414,7 +465,7 @@ void delete_user(const char *admin_user, const char *target, char *response) {
     fclose(f);
 
     f = fopen(USERS_FILE, "w");
-    if (!f) { strcpy(response, "ERRO: Nao foi possivel actualizar ficheiro."); return; }
+    if (!f) { strcpy(response, "ERRO: Não foi possível actualizar ficheiro."); return; }
 
     for (int i = 0; i < count; i++) {
         char id[10], u[50];
