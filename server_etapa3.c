@@ -42,6 +42,7 @@
 
 #include "protocolo.h"
 #include "db.h"
+#include "crypto.h"
 
 static cliente_t clientes[MAX_CLIENTS];
 static fd_set    master_set;
@@ -69,17 +70,22 @@ static int encontrar_slot_livre(void) {
 
 /* ============================================================================
  * FUNÇÃO: broadcast_canal()
- * Envia uma linha já framed (enviada via enviar_linha, conteúdo já
- * construído com a tag certa) a todos os clientes AUTENTICADOS que estão
- * no mesmo canal, excepto 'excluir_fd' (-1 para não excluir ninguém).
+ * Envia uma mensagem (já com tag, ex: "CHAT:geral:admin:ola" — mas AINDA
+ * em texto simples, por cifrar) a todos os clientes autenticados do
+ * mesmo canal, excepto 'excluir_fd'.
+ *
+ * Etapa 4 (F11/F12): cada ligação tem a SUA PRÓPRIA chave (derivada do
+ * handshake DH dessa ligação especificamente). Por isso não é possível
+ * cifrar a mensagem uma vez e reencaminhá-la tal-e-qual para todos —
+ * tem de se cifrar UMA VEZ POR DESTINATÁRIO, com a chave de cada um.
  * ============================================================================ */
-static void broadcast_canal(const char *canal, const char *linha_framed, int excluir_fd) {
+static void broadcast_canal(const char *canal, const char *linha_tagged_plain, int excluir_fd) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clientes[i].fd == -1) continue;
         if (!clientes[i].autenticado) continue;
         if (clientes[i].fd == excluir_fd) continue;
         if (strcmp(clientes[i].canal, canal) != 0) continue;
-        enviar_linha(clientes[i].fd, linha_framed);
+        enviar_linha_cifrada(clientes[i].fd, linha_tagged_plain, clientes[i].chave_simetrica);
     }
 }
 
@@ -148,7 +154,7 @@ static void processar_comando(int indice, char *linha) {
             strcpy(resposta, "AUTH_FAIL");
             sprintf(log_msg, "Login FALHOU: '%s'", u); log_type = 3;
         }
-        enviar_tagged(cli->fd, "RESP", resposta);
+        enviar_tagged_cifrada(cli->fd, "RESP", resposta, cli->chave_simetrica);
         guardar_log(log_msg, log_type);
         return;
     }
@@ -158,14 +164,14 @@ static void processar_comando(int indice, char *linha) {
         sscanf(linha + 9, "%49s %49s", u, p);
         register_user(u, p, resposta);
         sprintf(log_msg, "REGISTER: tentativa para '%s'", u); log_type = 1;
-        enviar_tagged(cli->fd, "RESP", resposta);
+        enviar_tagged_cifrada(cli->fd, "RESP", resposta, cli->chave_simetrica);
         guardar_log(log_msg, log_type);
         return;
     }
 
     /* ---- A partir daqui, TUDO exige autenticação ---- */
     if (!cli->autenticado) {
-        enviar_tagged(cli->fd, "RESP", "ERRO: Tens de autenticar primeiro (AUTH <user> <pass>).");
+        enviar_tagged_cifrada(cli->fd, "RESP", "ERRO: Tens de autenticar primeiro (AUTH <user> <pass>).", cli->chave_simetrica);
         return;
     }
 
@@ -271,13 +277,111 @@ static void processar_comando(int indice, char *linha) {
                 cli->username, cli->role, cli->canal);
         log_type = 0;
     }
+    /* ---- LIST_CANAL  (F15 extra — quem esta no meu canal agora) ---- */
+    else if (strcmp(linha, "LIST_CANAL") == 0) {
+        char temp[128];
+        snprintf(resposta, BUF_SIZE, "=== UTILIZADORES EM #%s ===\n", cli->canal);
+        int count = 0;
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clientes[i].fd == -1) continue;
+            if (!clientes[i].autenticado) continue;
+            if (strcmp(clientes[i].canal, cli->canal) != 0) continue;
+            snprintf(temp, sizeof(temp), " - %s (%s)%s\n",
+                     clientes[i].username, clientes[i].role,
+                     (clientes[i].fd == cli->fd) ? "  <- tu" : "");
+            strncat(resposta, temp, BUF_SIZE - strlen(resposta) - 1);
+            count++;
+        }
+        snprintf(temp, sizeof(temp), "Total: %d utilizador(es)\n", count);
+        strncat(resposta, temp, BUF_SIZE - strlen(resposta) - 1);
+        log_type = 0;
+    }
+    /* ---- CRYPTO_XOR <texto>  (F13 — 2a cifra simetrica) ---- */
+    else if (strncmp(linha, "CRYPTO_XOR ", 11) == 0) {
+        if (!is_admin(cli->username)) {
+            strcpy(resposta, "ERRO: Comando reservado a administradores.");
+        } else {
+            const char *texto = linha + 11;
+            size_t tam = strlen(texto);
+
+            unsigned char buffer[LINHA_MAX];
+            memcpy(buffer, texto, tam);
+
+            xor_cifrar(buffer, tam, XOR_CHAVE_OMISSAO, XOR_CHAVE_OMISSAO_LEN);
+            char hex[LINHA_MAX * 2];
+            bytes_para_hex(buffer, tam, hex);
+
+            /* XOR e a sua propria operacao inversa: cifrar de novo decifra */
+            xor_cifrar(buffer, tam, XOR_CHAVE_OMISSAO, XOR_CHAVE_OMISSAO_LEN);
+            buffer[tam] = '\0';
+
+            snprintf(resposta, BUF_SIZE, "XOR | Original: %.500s | Cifrado (hex): %.2000s | Decifrado: %.500s",
+                    texto, hex, (char *)buffer);
+        }
+        log_type = 0;
+    }
+    /* ---- CRYPTO_RSA <texto>  (F13 — cifra assimetrica) ---- */
+    else if (strncmp(linha, "CRYPTO_RSA ", 11) == 0) {
+        if (!is_admin(cli->username)) {
+            strcpy(resposta, "ERRO: Comando reservado a administradores.");
+        } else {
+            const char *texto = linha + 11;
+            char cifrado[LINHA_MAX] = "", decifrado[LINHA_MAX] = "";
+            char temp[16];
+            size_t dpos = 0;
+
+            for (size_t i = 0; texto[i] != '\0' && i < 200; i++) {
+                long long c = rsa_cifrar_char((unsigned char)texto[i]);
+                long long m = rsa_decifrar_char(c);
+
+                snprintf(temp, sizeof(temp), "%lld ", c);
+                strncat(cifrado, temp, sizeof(cifrado) - strlen(cifrado) - 1);
+                decifrado[dpos++] = (char)m;
+            }
+            decifrado[dpos] = '\0';
+
+            snprintf(resposta, BUF_SIZE,
+                    "RSA toy (e=%lld,n=%lld) | Original: %.200s | Cifrado: %.3000s| Decifrado: %.200s",
+                    RSA_E, RSA_N, texto, cifrado, decifrado);
+        }
+        log_type = 0;
+    }
+    /* ---- CRYPTO_HASH <texto>  (F13 — integridade) ---- */
+    else if (strncmp(linha, "CRYPTO_HASH ", 12) == 0) {
+        if (!is_admin(cli->username)) {
+            strcpy(resposta, "ERRO: Comando reservado a administradores.");
+        } else {
+            const char *texto = linha + 12;
+            unsigned int h = hash_fnv1a(texto);
+            sprintf(resposta, "HASH (FNV-1a) | Texto: %s | Hash: %08x", texto, h);
+        }
+        log_type = 0;
+    }
+    /* ---- CRYPTO_INFO  (F14 — consulta de parametros criptograficos) ---- */
+    else if (strcmp(linha, "CRYPTO_INFO") == 0) {
+        if (!is_admin(cli->username)) {
+            strcpy(resposta, "ERRO: Comando reservado a administradores.");
+        } else {
+            sprintf(resposta,
+                    "=== PARAMETROS CRIPTOGRAFICOS ===\n"
+                    "F11 Cifra de sessao: Cesar generalizada (alfabeto imprimivel 32-126)\n"
+                    "F12 Troca de chave: Diffie-Hellman | p=%lld | g=%lld\n"
+                    "     A tua chave de sessao actual (derivada do DH): %d\n"
+                    "F13 2a cifra simetrica: XOR | tamanho da chave: %d bytes\n"
+                    "F13 Cifra assimetrica: RSA toy | chave publica (e=%lld, n=%lld)\n"
+                    "F13 Hash de integridade: FNV-1a (32 bits)\n",
+                    DH_PRIMO, DH_GERADOR, cli->chave_simetrica,
+                    XOR_CHAVE_OMISSAO_LEN, RSA_E, RSA_N);
+        }
+        log_type = 0;
+    }
     /* ---- COMANDO DESCONHECIDO ---- */
     else {
         strcpy(resposta, "CMD_INVALID");
         sprintf(log_msg, "Comando desconhecido de '%s': '%s'", cli->username, linha); log_type = 3;
     }
 
-    enviar_tagged(cli->fd, "RESP", resposta);
+    enviar_tagged_cifrada(cli->fd, "RESP", resposta, cli->chave_simetrica);
     if (log_msg[0]) guardar_log(log_msg, log_type);
 }
 
@@ -344,13 +448,24 @@ int main(void) {
                     clientes[slot].username[0] = '\0';
                     strcpy(clientes[slot].canal, CANAL_OMISSAO);
 
-                    FD_SET(novo_fd, &master_set);
-                    if (novo_fd > fd_max) fd_max = novo_fd;
+                    /* Etapa 4 (F12): handshake Diffie-Hellman ANTES de
+                     * mais nada — a partir daqui, tudo o resto nesta
+                     * ligação vai cifrado com a chave que aqui se deriva. */
+                    if (!dh_handshake_servidor(&clientes[slot])) {
+                        guardar_log("Handshake DH falhou — ligacao rejeitada.", 3);
+                        close(novo_fd);
+                        clientes[slot].fd = -1;
+                    } else {
+                        FD_SET(novo_fd, &master_set);
+                        if (novo_fd > fd_max) fd_max = novo_fd;
 
-                    char msg[96];
-                    snprintf(msg, sizeof(msg), "Nova ligacao aceite (fd=%d) de %s",
-                             novo_fd, inet_ntoa(cli_addr.sin_addr));
-                    guardar_log(msg, 0);
+                        char msg[128];
+                        snprintf(msg, sizeof(msg),
+                                 "Nova ligacao aceite (fd=%d) de %s | chave DH=%d",
+                                 novo_fd, inet_ntoa(cli_addr.sin_addr),
+                                 clientes[slot].chave_simetrica);
+                        guardar_log(msg, 0);
+                    }
                 }
             }
         }
@@ -379,6 +494,7 @@ int main(void) {
 
             char linha[LINHA_MAX];
             while (extrair_linha(&clientes[i], linha, sizeof(linha))) {
+                cesar_decifrar_texto(linha, clientes[i].chave_simetrica);
                 if (strlen(linha) > 0)
                     processar_comando(i, linha);
             }

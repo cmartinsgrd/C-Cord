@@ -71,6 +71,7 @@
     #include <unistd.h>
     #include <sys/socket.h>
     #include <sys/select.h>
+    #include <termios.h>
     
     #define CLOSE_SOCKET(s) close(s)
     #define SLEEP_SEC(s) sleep(s)
@@ -80,6 +81,7 @@
 #endif
 
 #include "protocolo.h"
+#include "crypto.h"
 
 /* ============================================================================
  * CONSTANTES
@@ -162,6 +164,66 @@ static cliente_t sessao_net;
 void clear_buffer() {
     int c;
     while ((c = getchar()) != '\n' && c != EOF);
+}
+
+/* ============================================================================
+ * FUNÇÃO: ler_password()
+ * ============================================================================
+ *
+ * Lê uma password do teclado SEM a mostrar em texto simples — cada tecla
+ * premida aparece como '*' no ecrã.
+ *
+ * COMO FUNCIONA:
+ *   Por omissão, o terminal está em modo "canónico com eco": o que se
+ *   escreve aparece no ecrã e só chega ao programa depois de premir
+ *   ENTER. Para conseguirmos mostrar '*' em vez da tecla real, temos de:
+ *     1. Desligar o ECO (para o terminal não mostrar a tecla verdadeira)
+ *     2. Desligar o modo CANÓNICO (para recebermos tecla a tecla, em vez
+ *        de esperar por uma linha inteira) — assim conseguimos reagir a
+ *        cada tecla individualmente (incluindo Backspace)
+ *   No fim, repomos a configuração original do terminal — se não o
+ *   fizéssemos, o terminal ficava "estragado" (sem eco) mesmo depois do
+ *   programa terminar.
+ *
+ * FALLBACK: se stdin não for um terminal interativo de verdade (ex:
+ * dados a vir de um pipe/ficheiro, como em testes automáticos),
+ * tcgetattr() falha — nesse caso lemos a linha normalmente, sem máscara,
+ * em vez de rebentar o programa.
+ * ============================================================================
+ */
+void ler_password(char *buffer, size_t max_len) {
+    struct termios antigo, novo;
+
+    if (tcgetattr(STDIN_FILENO, &antigo) != 0) {
+        /* stdin não é um terminal (pipe/redirecionamento) — sem máscara */
+        if (fgets(buffer, (int)max_len, stdin) != NULL)
+            buffer[strcspn(buffer, "\n")] = '\0';
+        return;
+    }
+
+    novo = antigo;
+    novo.c_lflag &= ~((unsigned int)(ECHO | ICANON));
+    tcsetattr(STDIN_FILENO, TCSANOW, &novo);
+
+    size_t i = 0;
+    int c;
+    while (i < max_len - 1 && (c = getchar()) != '\n' && c != EOF) {
+        if (c == 127 || c == 8) {              /* Backspace / Delete */
+            if (i > 0) {
+                i--;
+                printf("\b \b");                /* apaga o último '*' no ecrã */
+                fflush(stdout);
+            }
+        } else {
+            buffer[i++] = (char)c;
+            printf("*");
+            fflush(stdout);
+        }
+    }
+    buffer[i] = '\0';
+    printf("\n");
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &antigo);  /* repõe o terminal original */
 }
 
 
@@ -348,6 +410,16 @@ int conectar_servidor(struct sockaddr_in *liga_addr) {
 
     sessao_net.buffer_len = 0;
     strcpy(sessao_net.canal, CANAL_OMISSAO);
+
+    /* Etapa 4 (F12): handshake Diffie-Hellman logo a seguir ao connect(),
+     * antes de qualquer comando (incluindo AUTH). Se falhar, a ligação
+     * não serve para nada — tratamos como falha de ligação. */
+    if (!dh_handshake_cliente(&sessao_net)) {
+        CLOSE_SOCKET(sessao_net.fd);
+        sessao_net.fd = -1;
+        return 0;
+    }
+
     return 1;
 }
 
@@ -373,6 +445,7 @@ static int receber_resposta(char *response_out) {
         /* Processar já tudo o que estiver acumulado no buffer antes de
          * voltar a bloquear em select() — pode haver várias linhas juntas */
         while (extrair_linha(&sessao_net, linha, sizeof(linha))) {
+            cesar_decifrar_texto(linha, sessao_net.chave_simetrica);
             if (strncmp(linha, "RESP:", 5) == 0) {
                 char conteudo[LINHA_MAX];
                 strncpy(conteudo, linha + 5, sizeof(conteudo) - 1);
@@ -431,15 +504,12 @@ static int receber_resposta(char *response_out) {
  * em main(), e delega a leitura a receber_resposta().
  * ============================================================================
  */
-int call_server(const char *cmd, char *response_out) 
-{
-    if (sessao_net.fd < 0) 
-    {
+int call_server(const char *cmd, char *response_out) {
+    if (sessao_net.fd < 0) {
         if (response_out) strcpy(response_out, "ERRO: Sem ligacao ao servidor.");
         return 0;
     }
-    if (enviar_linha(sessao_net.fd, cmd) != 0) 
-    {
+    if (enviar_linha_cifrada(sessao_net.fd, cmd, sessao_net.chave_simetrica) != 0) {
         if (response_out) strcpy(response_out, "ERRO: Falha ao enviar para o servidor.");
         return 0;
     }
@@ -557,9 +627,8 @@ void fluxo_login() {
         draw_header(0, "LOGIN / AUTENTICAÇÃO");
         char u[50], p[50], cmd[150], res[BUF_SIZE];
 
-        printf(" Nome de Utilizador: "); scanf("%49s", u);
-        printf(" Palavra-passe: ");      scanf("%49s", p);
-        clear_buffer();
+        printf(" Nome de Utilizador: "); scanf("%49s", u); clear_buffer();
+        printf(" Palavra-passe: ");      ler_password(p, sizeof(p));
 
         printf("\n [A VERIFICAR CREDENCIAIS...]\n");
 
@@ -654,9 +723,9 @@ void fluxo_registo() {
         draw_header(0, "CRIAR NOVA CONTA (F6)");
         char u[50], p[50], p2[50], email[100], cmd[200], res[BUF_SIZE];
 
-        printf(" Escolha o Nome de Utilizador: "); scanf("%49s", u);
-        printf(" Escolha a Palavra-passe: ");      scanf("%49s", p);
-        printf(" Confirme a Palavra-passe: ");     scanf("%49s", p2);
+        printf(" Escolha o Nome de Utilizador: "); scanf("%49s", u); clear_buffer();
+        printf(" Escolha a Palavra-passe: ");      ler_password(p, sizeof(p));
+        printf(" Confirme a Palavra-passe: ");     ler_password(p2, sizeof(p2));
         printf(" Introduza o seu E-mail: ");       scanf("%99s", email);
         clear_buffer();
 
@@ -729,10 +798,9 @@ void submenu_perfil() {
         if (opt == 1) {
             draw_header(1, "ALTERAR PALAVRA-PASSE");
             char p_atual[50], p_novo[50], p_conf[50], cmd[200], res[BUF_SIZE];
-            printf(" Palavra-passe Atual  : "); scanf("%49s", p_atual);
-            printf(" Nova Palavra-passe   : "); scanf("%49s", p_novo);
-            printf(" Confirmar            : "); scanf("%49s", p_conf);
-            clear_buffer();
+            printf(" Palavra-passe Atual  : "); ler_password(p_atual, sizeof(p_atual));
+            printf(" Nova Palavra-passe   : "); ler_password(p_novo, sizeof(p_novo));
+            printf(" Confirmar            : "); ler_password(p_conf, sizeof(p_conf));
 
             if (strcmp(p_novo, p_conf) != 0) {
                 printf("\n \033[1;31m[ERRO]\033[0m As palavras-passe não coincidem.\n");
@@ -1002,6 +1070,7 @@ void submenu_mensagens() {
  *
  * Comandos disponíveis dentro do chat:
  *   /join <canal>   → envia JOIN <canal> ao servidor (F10)
+ *   /quem           → lista quem está no canal actual (F15 extra)
  *   /sair           → volta ao menu principal (a ligação continua aberta)
  *   qualquer texto  → envia CHAT <texto> (broadcast no canal actual)
  *
@@ -1014,6 +1083,7 @@ void submenu_canais_user() {
     printf(" MODO CHAT EM TEMPO REAL (F9/F10) — Canal atual: #%s\n", sessao_net.canal);
     printf("====================================================\033[0m\n");
     printf(" /join <canal>   muda de canal\n");
+    printf(" /quem           lista quem esta neste canal\n");
     printf(" /sair           volta ao menu principal\n");
     printf(" (qualquer outro texto é enviado como mensagem no canal)\n");
     printf("----------------------------------------------------\n\n");
@@ -1051,17 +1121,22 @@ void submenu_canais_user() {
                 SLEEP_SEC(1);
                 return;
 
+            } else if (strcmp(linha_entrada, "/quem") == 0) {
+                enviar_linha_cifrada(sessao_net.fd, "LIST_CANAL", sessao_net.chave_simetrica);
+                /* a resposta chega etiquetada RESP: e e mostrada mais abaixo,
+                 * no mesmo sitio que trata JOIN_OK/SYS/CHAT */
+
             } else if (strncmp(linha_entrada, "/join ", 6) == 0) {
                 char cmd[64];
                 snprintf(cmd, sizeof(cmd), "JOIN %s", linha_entrada + 6);
-                enviar_linha(sessao_net.fd, cmd);
+                enviar_linha_cifrada(sessao_net.fd, cmd, sessao_net.chave_simetrica);
                 /* a confirmação JOIN_OK chega etiquetada como RESP: e é
                  * tratada mais abaixo, no mesmo sítio que SYS:/CHAT: */
 
             } else {
                 char cmd[LINHA_MAX + 8];
                 snprintf(cmd, sizeof(cmd), "CHAT %s", linha_entrada);
-                enviar_linha(sessao_net.fd, cmd);
+                enviar_linha_cifrada(sessao_net.fd, cmd, sessao_net.chave_simetrica);
                 /* O servidor NÃO ecoa a nossa própria mensagem de volta
                  * (ver broadcast_canal() no servidor) — mostramo-la já
                  * aqui localmente para o utilizador ver o que escreveu. */
@@ -1092,6 +1167,7 @@ void submenu_canais_user() {
 
             char linha_srv[LINHA_MAX];
             while (extrair_linha(&sessao_net, linha_srv, sizeof(linha_srv))) {
+                cesar_decifrar_texto(linha_srv, sessao_net.chave_simetrica);
 
                 if (strncmp(linha_srv, "CHAT:", 5) == 0) {
                     char canal_msg[MAX_CANAL_NOME] = "", user[MAX_USERNAME] = "", msg[LINHA_MAX] = "";
@@ -1240,18 +1316,14 @@ void admin_echo() {
     }
 }
 
-
-// ========== ADMIN - GESTÃO DE USERS ================================================================================
-void admin_gestao_utilizadores() 
-{
-    while (1) 
-    {
+void admin_gestao_utilizadores() {
+    while (1) {
         draw_header(2, "Gestão de Utilizadores");
         printf(" [ 1 ] Listar Todos os Utilizadores\n");
         printf(" [ 2 ] Utilizadores Pendentes de Aprovação (F7)\n");
         printf(" [ 3 ] Ativar / Inativar Conta\n");
-        printf(" [ 4 ] Remover Utilizador Permanente (F8)\n\n");
-        printf(" [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
+        printf(" [ 4 ] Remover Utilizador Permanente (F8)\n");
+        printf("\n [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
 
         int opt; if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }
         clear_buffer();
@@ -1262,9 +1334,9 @@ void admin_gestao_utilizadores()
         if (opt == 1) {
             draw_header(2, "Listagem Geral de Utilizadores");
             call_server("LIST_ALL", res);
-            printf(" [BASE DE DADOS LOCAL - users.txt]\n");
+            printf(" [BASE DE DADOS LOCAL - users.txt]\n\n");
             print_server_response(res);
-            printf("\n [ 1 ] Atualizar (Refresh)\n [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
+            printf("\n [ 1 ] Atualizar (Refresh) | [ 0 ] Voltar\n\n Escolha: ");
             int o; if (scanf("%d", &o) != 1) o = 0; clear_buffer();
             (void)o;
         }
@@ -1280,35 +1352,30 @@ void admin_gestao_utilizadores()
                 char target[50]; scanf("%49s", target); clear_buffer();
                 if (strcmp(target, "0") == 0) break;
 
-                printf("\n \033[1;33m[INFO]\033[0m Utilizador selecionado: %s\n", target);
-                printf(" [ A ] Aprovar | [ R ] Rejeitar\n [ 0 ] Voltar para Gestão de Utilizadores\n Escolha: ");
+                printf("\n [INFO] Selecionado: %s\n", target);
+                printf(" Ações: [ A ] Aprovar | [ R ] Rejeitar | [ 0 ] Voltar\n Escolha: ");
                 char acao[5]; scanf("%4s", acao); clear_buffer();
                 if (acao[0] == '0') break;
 
-                if (acao[0] == 'A' || acao[0] == 'a') 
-                {
+                if (acao[0] == 'A' || acao[0] == 'a') {
                     printf("\n +-------------------------------------------------+\n");
-                    printf(" |       Confirma a APROVAÇÃO do utilizador?         |\n");
-                    printf(" |     [ S ] Sim                     [ N ] Não       |\n");
+                    printf(" | [?] Confirma a APROVAÇÃO do utilizador?         |\n");
+                    printf(" |     [ S ] Sim                     [ N ] Não     |\n");
                     printf(" +-------------------------------------------------+\n Resposta: ");
                     char confirm[5]; scanf("%4s", confirm); clear_buffer();
-                    if (confirm[0] == 'S' || confirm[0] == 's') 
-                    {
+                    if (confirm[0] == 'S' || confirm[0] == 's') {
                         sprintf(cmd, "APPROVE_USER %s", target);
                         call_server(cmd, res);
                         printf("\n \033[1;32m[OK]\033[0m %s\n", res);
                         aguardar_enter();
                     }
-                } 
-                else if (acao[0] == 'R' || acao[0] == 'r') 
-                {
+                } else if (acao[0] == 'R' || acao[0] == 'r') {
                     printf("\n +-------------------------------------------------+\n");
-                    printf(" |       Confirma a REJEIÇÃO do utilizador?          |\n");
+                    printf(" | [?] Confirma a REJEIÇÃO do utilizador?          |\n");
                     printf(" |     [ S ] Sim                     [ N ] Não     |\n");
                     printf(" +-------------------------------------------------+\n Resposta: ");
                     char confirm[5]; scanf("%4s", confirm); clear_buffer();
-                    if (confirm[0] == 'S' || confirm[0] == 's') 
-                    {
+                    if (confirm[0] == 'S' || confirm[0] == 's') {
                         sprintf(cmd, "DELETE_USER %s", target);
                         call_server(cmd, res);
                         printf("\n \033[1;32m[OK]\033[0m Utilizador '%s' rejeitado e removido.\n", target);
@@ -1317,8 +1384,7 @@ void admin_gestao_utilizadores()
                 }
             }
         }
-        else if (opt == 3) 
-        {
+        else if (opt == 3) {
             draw_header(2, "Ativar / Inativar Conta");
             call_server("LIST_ALL", res);
             print_server_response(res);
@@ -1327,14 +1393,14 @@ void admin_gestao_utilizadores()
             char target[50]; scanf("%49s", target); clear_buffer();
             if (strcmp(target, "0") == 0) continue;
 
-            printf("\n \033[1;33m[INFO]\033[0m Utilizador selecionado: %s\n", target);
+            printf("\n [INFO] Selecionado: %s\n", target);
             printf(" Deseja alterar o estado?\n");
             printf(" [ S ] Sim   [ N ] Não\n\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
 
             if (confirm[0] == 'S' || confirm[0] == 's') {
                 printf("\n +-------------------------------------------------+\n");
-                printf(" | [?] Confirma ALTERAÇÃO DE ESTADO do utilizador?         |\n");
+                printf(" | [?] Confirma a ALTERAÇÃO do utilizador?         |\n");
                 printf(" |     [ S ] Sim                     [ N ] Não     |\n");
                 printf(" +-------------------------------------------------+\n Resposta: ");
                 char confirm2[5]; scanf("%4s", confirm2); clear_buffer();
@@ -1346,8 +1412,7 @@ void admin_gestao_utilizadores()
                 }
             }
         }
-        else if (opt == 4) 
-        {
+        else if (opt == 4) {
             draw_header(2, "Remover Utilizador (F8)");
             call_server("LIST_ALL", res);
             print_server_response(res);
@@ -1362,13 +1427,12 @@ void admin_gestao_utilizadores()
             printf(" +-------------------------------------------------+\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
 
-            if (confirm[0] == 'S' || confirm[0] == 's') 
-            {
+            if (confirm[0] == 'S' || confirm[0] == 's') {
                 printf("\n [!] A modificar base de dados local...\n");
                 sprintf(cmd, "DELETE_USER %s", target);
                 call_server(cmd, res);
                 if (strncmp(res, "DELETE_OK", 9) == 0)
-                    printf(" \033[1;32m[OK]\033[0m O Utilizador '%s' foi eliminado com sucesso!\n", target);
+                    printf(" \033[1;32m[OK]\033[0m Utilizador '%s' removido com sucesso!\n", target);
                 else
                     printf(" \033[1;31m[ERRO]\033[0m %s\n", res);
                 aguardar_enter();
@@ -1377,15 +1441,8 @@ void admin_gestao_utilizadores()
     }
 }
 
-
-
-
-
-// ========== ADMIN - LOGS ================================================================================
-void admin_logs() 
-{
-    while (1) 
-    {
+void admin_logs() {
+    while (1) {
         draw_header(2, "Logs de Atividade");
         char res[BUF_SIZE], cmd[100];
         strcpy(cmd, "VIEW_LOGS");
@@ -1397,13 +1454,11 @@ void admin_logs()
         int opt; if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }
         clear_buffer();
         if (opt == 0) return;
-        if (opt == 1) 
-        {
+        if (opt == 1) {
             printf("\n \033[1;33m[AVISO]\033[0m Esta operação apaga todos os registos.\n");
             printf(" Confirmar? [ S / N ]: ");
             char c[5]; scanf("%4s", c); clear_buffer();
-            if (c[0] == 'S' || c[0] == 's') 
-            {
+            if (c[0] == 'S' || c[0] == 's') {
                 printf(" \033[1;32m[OK]\033[0m Logs limpos.\n");
                 aguardar_enter();
                 return;
@@ -1412,17 +1467,15 @@ void admin_logs()
     }
 }
 
-// ========== ADMIN - GESTÃO DE CANAIS ================================================================================
-void admin_canais() 
-{
-    while (1) 
-    {
+void admin_canais() {
+    while (1) {
         draw_header(2, "Gestão de Canais (F10)");
         printf(" [ 1 ] Listar Todos os Canais\n");
         printf(" [ 2 ] Criar Novo Canal\n");
         printf(" [ 3 ] Remover Canal\n");
         printf(" [ 4 ] Banir Utilizador de Canal\n");
-        printf(" [ 5 ] Ver Atividades de Canais\n\n");
+        printf(" [ 5 ] Ver Atividades de Canais\n");
+        printf("\n----------------------------------------------------\n");
         printf(" [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
         
         int opt;
@@ -1431,8 +1484,7 @@ void admin_canais()
         
         if (opt == 0) return;
         
-        if (opt == 1) 
-        {
+        if (opt == 1) {
             draw_header(2, "Listagem de Canais");
             printf(" [CANAIS REGISTADOS]\n\n");
             printf(" ID | Nome      | Tipo      | Membros | Proprietário | Estado\n");
@@ -1446,8 +1498,7 @@ void admin_canais()
             printf(" Total: 5 canais ativos\n");
             aguardar_enter();
         }
-        else if (opt == 2) 
-        {
+        else if (opt == 2) {
             draw_header(2, "Criar Novo Canal");
             char nome[50], tipo[20], descr[200];
             printf(" Nome do canal: "); scanf("%49s", nome); clear_buffer();
@@ -1458,8 +1509,7 @@ void admin_canais()
             printf(" \033[1;32m[OK]\033[0m Canal '#%s' criado com sucesso!\n", nome);
             aguardar_enter();
         }
-        else if (opt == 3) 
-        {
+        else if (opt == 3) {
             draw_header(2, "Remover Canal");
             printf(" [CANAIS REMOVÍVEIS]\n\n");
             printf(" [ 4 ] #privado   (5 membros, criado por alice)\n");
@@ -1479,14 +1529,12 @@ void admin_canais()
             printf(" +-------------------------------------------------+\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
             
-            if (confirm[0] == 'S' || confirm[0] == 's') 
-            {
+            if (confirm[0] == 'S' || confirm[0] == 's') {
                 printf("\n \033[1;32m[OK]\033[0m Canal removido permanentemente.\n");
                 aguardar_enter();
             }
         }
-        else if (opt == 4) 
-        {
+        else if (opt == 4) {
             draw_header(2, "Banir Utilizador de Canal");
             printf(" [SELECIONE O CANAL]\n\n");
             printf(" [ 1 ] #geral\n");
@@ -1507,14 +1555,12 @@ void admin_canais()
             printf(" +-------------------------------------------------+\n Resposta: ");
             char confirm[5]; scanf("%4s", confirm); clear_buffer();
             
-            if (confirm[0] == 'S' || confirm[0] == 's') 
-            {
+            if (confirm[0] == 'S' || confirm[0] == 's') {
                 printf("\n \033[1;32m[OK]\033[0m Utilizador '%s' banido do canal.\n", user);
                 aguardar_enter();
             }
         }
-        else if (opt == 5) 
-        {
+        else if (opt == 5) {
             draw_header(2, "Atividades de Canais");
             printf(" [REGISTOS DE ATIVIDADE]\n\n");
             printf(" [13:24] alice    | #linux   | Enviou mensagem\n");
@@ -1531,124 +1577,86 @@ void admin_canais()
     }
 }
 
-void admin_seguranca() 
-{
-    while (1) 
-    {
-        draw_header(2, "Painel de Segurança");
-        printf(" [ESTADO ATUAL]\n\n");
-        printf(" > Método Simétrico (F11) : Cifra de César (chave: 3)\n");
-        printf(" > Método Assimétrico(F13): RSA toy (2048-bit, versão educação)\n");
-        printf(" > Integridade (F14)      : SHA-256 para mensagens críticas\n");
-        printf(" > Status de Sessão       : \033[1;32m[SEGURA]\033[0m\n\n");
+/* ============================================================================
+ * FUNÇÃO: admin_seguranca()
+ * ============================================================================
+ *
+ * Etapa 4 (F13/F14) — já NÃO é mock. Cada opção envia um comando real ao
+ * servidor (CRYPTO_XOR, CRYPTO_RSA, CRYPTO_HASH, CRYPTO_INFO) e mostra a
+ * resposta tal como veio, já decifrada por call_server().
+ * ============================================================================
+ */
+void admin_seguranca() {
+    while (1) {
+        draw_header(2, "Painel de Criptografia (F13/F14)");
+        printf(" [ALGORITMOS DISPONÍVEIS NESTA SESSÃO]\n\n");
+        printf(" F11 Cifra de sessão   : César generalizada (todo o tráfego)\n");
+        printf(" F12 Troca de chave    : Diffie-Hellman (por ligação)\n");
+        printf(" F13 2ª cifra simétrica: XOR com chave repetida\n");
+        printf(" F13 Cifra assimétrica : RSA toy (e=17, n=3233)\n");
+        printf(" F13 Integridade       : Hash FNV-1a\n\n");
         printf("----------------------------------------------------\n");
-        printf(" [ 1 ] Consultar Parâmetros Criptográficos\n");
-        printf(" [ 2 ] Alterar Método de Encriptação\n");
-        printf(" [ 3 ] Gerar Novas Chaves (RSA)\n");
-        printf(" [ 4 ] Validar Integridade de Dados\n");
-        printf(" [ 5 ] Relatório de Segurança\n\n");
-
+        printf(" [ 1 ] Consultar Parâmetros Criptográficos (F14)\n");
+        printf(" [ 2 ] Testar Cifra XOR\n");
+        printf(" [ 3 ] Testar Cifra RSA (toy)\n");
+        printf(" [ 4 ] Calcular Hash de Integridade\n");
+        printf("\n----------------------------------------------------\n");
         printf(" [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
-        
+
         int opt;
         if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }
         clear_buffer();
-        
+
         if (opt == 0) return;
-        
-        if (opt == 1) 
-        {
-            draw_header(2, "Parâmetros Criptográficos");
-            printf(" [CONFIGURAÇÃO ATIVA]\n\n");
-            printf(" Algoritmo Simétrico  : Caesar (chave = 3)\n");
-            printf(" Tamanho              : Variável (por mensagem)\n");
-            printf(" Modo de Operação     : ECB (Educational Cipher Block)\n\n");
-            printf(" Algoritmo Assimétrico: RSA Toy\n");
-            printf(" Tamanho de Chave     : 2048 bits\n");
-            printf(" Preenchimento        : PKCS#1 v1.5\n");
-            printf(" Modulus              : 0x%s...\n", "d4a574d69a8c2e91");
-            printf(" Exponent             : 0x10001 (65537)\n\n");
-            printf(" Hash (Integridade)   : SHA-256\n");
-            printf(" Tamanho de Digest    : 256 bits (32 bytes)\n");
-            printf("----------------------------------------------------\n");
+
+        char res[BUF_SIZE];
+
+        if (opt == 1) {
+            draw_header(2, "Parâmetros Criptográficos (F14)");
+            call_server("CRYPTO_INFO", res);
+            print_server_response(res);
             aguardar_enter();
         }
-        else if (opt == 2) 
-        {
-            draw_header(2, "Alterar Método de Encriptação");
-            printf(" [ALGORITMOS DISPONÍVEIS]\n\n");
-            printf(" [ 1 ] Caesar (chave ajustável de 1-25)\n");
-            printf(" [ 2 ] Vigenère (chave de texto)\n");
-            printf(" [ 3 ] XOR (chave binária)\n");
-            printf("\n----------------------------------------------------\n");
-            printf(" Selecione novo algoritmo (ou 0 para VOLTAR): ");
-            int alg; if (scanf("%d", &alg) != 1) { clear_buffer(); continue; }
-            clear_buffer();
-            
-            if (alg == 0) continue;
-            if (alg >= 1 && alg <= 3) {
-                printf("\n [A PROCESSAR...]\n");
-                const char *algs[] = {"", "Caesar", "Vigenère", "XOR"};
-                printf(" \033[1;32m[OK]\033[0m Algoritmo alterado para %s.\n", algs[alg]);
-                printf(" Todas as conexões futuras usarão este método.\n");
-                aguardar_enter();
-            }
+        else if (opt == 2) {
+            draw_header(2, "Testar Cifra XOR (F13)");
+            char texto[400], cmd[450];
+            printf(" Texto a cifrar: ");
+            fgets(texto, sizeof(texto), stdin);
+            texto[strcspn(texto, "\n")] = '\0';
+
+            snprintf(cmd, sizeof(cmd), "CRYPTO_XOR %s", texto);
+            call_server(cmd, res);
+            printf("\n");
+            print_server_response(res);
+            aguardar_enter();
         }
-        else if (opt == 3) 
-        {
-            draw_header(2, "Gerar Novas Chaves RSA");
-            printf(" [OPERAÇÃO SENSÍVEL]\n\n");
-            printf(" Esta operação vai:\n");
-            printf(" 1. Gerar novo par de chaves (pública/privada)\n");
-            printf(" 2. Substituir as chaves existentes\n");
-            printf(" 3. Invalidar todas as sessões antigas\n\n");
-            printf(" +-------------------------------------------------+\n");
-            printf(" | [!] Tem a certeza que deseja prosseguir?        |\n");
-            printf(" |     [ S ] Sim                     [ N ] Não     |\n");
-            printf(" +-------------------------------------------------+\n Resposta: ");
-            char confirm[5]; scanf("%4s", confirm); clear_buffer();
-            
-            if (confirm[0] == 'S' || confirm[0] == 's') {
-                printf("\n [A PROCESSAR...]\n");
-                printf(" [1/3] A gerar números primos aleatórios...\n");
-                printf(" [2/3] A calcular módulo e expoentes...\n");
-                printf(" [3/3] A guardar chaves...\n\n");
-                printf(" \033[1;32m[OK]\033[0m Novas chaves geradas com sucesso!\n");
-                printf(" Fingerprint da chave pública:\n");
-                printf(" SHA-256: 3e4a8d2f9c1b7e5a3d6c2f8b1a9e4d7c\n");
-                aguardar_enter();
-            }
+        else if (opt == 3) {
+            draw_header(2, "Testar Cifra RSA toy (F13)");
+            char texto[200], cmd[250];
+            printf(" Texto a cifrar (poucos caracteres — RSA toy é lento): ");
+            fgets(texto, sizeof(texto), stdin);
+            texto[strcspn(texto, "\n")] = '\0';
+
+            snprintf(cmd, sizeof(cmd), "CRYPTO_RSA %s", texto);
+            printf("\n [A CALCULAR...]\n");
+            call_server(cmd, res);
+            printf("\n");
+            print_server_response(res);
+            aguardar_enter();
         }
         else if (opt == 4) {
-            draw_header(2, "Validar Integridade de Dados");
-            printf(" [VERIFICAÇÃO DE INTEGRIDADE]\n\n");
-            printf(" Base de Dados (users.txt):\n");
-            printf(" SHA-256: 8f9c2d5e1a3b7c4e9d2f6a1c3e5b7a9d\n");
-            printf(" Status  : \033[1;32m[VÁLIDO]\033[0m ✓\n\n");
-            printf(" Inbox (inbox.txt):\n");
-            printf(" SHA-256: 2a5c8d1e3f6a9b4c7e2f5d8a1b4c7e3a\n");
-            printf(" Status  : \033[1;32m[VÁLIDO]\033[0m ✓\n\n");
-            printf(" Logs (logs.txt):\n");
-            printf(" SHA-256: c7e1a3d5f9b2e4a6c8f1d3a5b7c9e2f4\n");
-            printf(" Status  : \033[1;32m[VÁLIDO]\033[0m ✓\n\n");
-            printf("----------------------------------------------------\n");
-            printf(" Integridade geral: \033[1;32m[SEGURA]\033[0m\n");
-            aguardar_enter();
-        }
-        else if (opt == 5) {
-            draw_header(2, "Relatório de Segurança");
-            printf(" [ESTADO DO SISTEMA]\n\n");
-            printf(" Ataques bloqueados (24h):\n");
-            printf(" > Força bruta          : 12\n");
-            printf(" > Injeção SQL          : 0\n");
-            printf(" > Buffer overflow      : 0\n");
-            printf(" > Acesso não autorizado: 3\n\n");
-            printf(" Contas em risco:\n");
-            printf(" > Sem password forte   : 0\n");
-            printf(" > Não usado em 30 dias : 2 (alice, diana)\n");
-            printf(" > Com logout pendente  : 0\n\n");
-            printf(" Score de Segurança: \033[1;32m92/100\033[0m (EXCELENTE)\n");
-            printf("----------------------------------------------------\n");
+            draw_header(2, "Calcular Hash FNV-1a (F13)");
+            char texto[400], cmd[450];
+            printf(" Texto para calcular o hash: ");
+            fgets(texto, sizeof(texto), stdin);
+            texto[strcspn(texto, "\n")] = '\0';
+
+            snprintf(cmd, sizeof(cmd), "CRYPTO_HASH %s", texto);
+            call_server(cmd, res);
+            printf("\n");
+            print_server_response(res);
+            printf("\n Nota: se mudares um único caractere do texto e repetires,\n");
+            printf(" repara como o hash muda por completo (efeito de avalanche).\n");
             aguardar_enter();
         }
     }

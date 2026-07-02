@@ -79,6 +79,11 @@ typedef struct {
 
     char   buffer_entrada[BUF_SIZE];    /* acumulador de bytes recebidos */
     size_t buffer_len;                  /* bytes válidos em buffer_entrada */
+
+    int    chave_simetrica;             /* Etapa 4 (F11/F12): chave de César
+                                          * desta ligação, derivada do segredo
+                                          * Diffie-Hellman. Cada ligação tem a
+                                          * sua própria chave (ver crypto.h). */
 } cliente_t;
 
 /* ---------------------------------------------------------------------
