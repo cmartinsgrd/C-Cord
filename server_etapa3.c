@@ -121,6 +121,26 @@ static void remover_cliente(int indice)
 }
 
 /* ============================================================================
+ * FUNÇÃO: desconectar_sessao_ativa()
+ * ============================================================================
+ *
+ * Se 'username' tiver uma ligação autenticada neste momento, avisa-o do
+ * motivo (tag SYS:, já tratada no cliente) e termina-lhe a sessão de
+ * imediato — usado quando um admin elimina ou inativa a conta de alguém
+ * que ainda está ligado, para que o acesso não continue válido até essa
+ * pessoa se desligar por vontade própria.
+ * ============================================================================ */
+static void desconectar_sessao_ativa(const char *username, const char *motivo) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clientes[i].fd == -1 || !clientes[i].autenticado) continue;
+        if (strcmp(clientes[i].username, username) != 0) continue;
+        enviar_tagged_cifrada(clientes[i].fd, "SYS", motivo, clientes[i].chave_simetrica);
+        remover_cliente(i);
+        break;
+    }
+}
+
+/* ============================================================================
  * FUNÇÃO: processar_comando()
  * ============================================================================
  *
@@ -295,19 +315,27 @@ static void processar_comando(int indice, char *linha)
         sprintf(log_msg, "APPROVE_USER: '%s' por '%s'", target, cli->username); log_type = 1;
     }
     /* ---- SUSPEND_USER <target> ---- */
-    else if (strncmp(linha, "SUSPEND_USER ", 13) == 0) 
+    else if (strncmp(linha, "SUSPEND_USER ", 13) == 0)
     {
         char target[50] = "";
         sscanf(linha + 13, "%49s", target);
+        char username_alvo[50] = "";
+        obter_username_por_id(atoi(target), username_alvo);
         suspend_user(cli->username, target, resposta);
+        if (username_alvo[0] && strncmp(resposta, "SUSPEND_OK", 10) == 0 && strstr(resposta, "INACTIVE"))
+            desconectar_sessao_ativa(username_alvo, "A tua conta foi inativada por um administrador. Sessao terminada.");
         sprintf(log_msg, "SUSPEND_USER: '%s' por '%s'", target, cli->username); log_type = 1;
     }
     /* ---- DELETE_USER <target> ---- */
-    else if (strncmp(linha, "DELETE_USER ", 12) == 0) 
+    else if (strncmp(linha, "DELETE_USER ", 12) == 0)
     {
         char target[50] = "";
         sscanf(linha + 12, "%49s", target);
+        char username_alvo[50] = "";
+        obter_username_por_id(atoi(target), username_alvo);
         delete_user(cli->username, target, resposta);
+        if (username_alvo[0] && strncmp(resposta, "DELETE_OK", 9) == 0)
+            desconectar_sessao_ativa(username_alvo, "A tua conta foi eliminada por um administrador. Sessao terminada.");
         sprintf(log_msg, "DELETE_USER: '%s' por '%s'", target, cli->username); log_type = 1;
     }
     /* ---- CHANGE_PASSWORD <nova_pass>  (username = sessao actual) ---- */

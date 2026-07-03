@@ -405,11 +405,13 @@ void draw_header(int modo, const char *subtitulo) {
  * Devolve 1 em sucesso, 0 em erro (liga_addr já deve estar preenchido).
  * ============================================================================
  */
-int conectar_servidor(struct sockaddr_in *liga_addr) {
+int conectar_servidor(struct sockaddr_in *liga_addr) 
+{
     sessao_net.fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sessao_net.fd < 0) return 0;
 
-    if (connect(sessao_net.fd, (struct sockaddr *)liga_addr, sizeof(*liga_addr)) != 0) {
+    if (connect(sessao_net.fd, (struct sockaddr *)liga_addr, sizeof(*liga_addr)) != 0) 
+    {
         CLOSE_SOCKET(sessao_net.fd);
         sessao_net.fd = -1;
         return 0;
@@ -421,7 +423,8 @@ int conectar_servidor(struct sockaddr_in *liga_addr) {
     /* Etapa 4 (F12): handshake Diffie-Hellman logo a seguir ao connect(),
      * antes de qualquer comando (incluindo AUTH). Se falhar, a ligação
      * não serve para nada — tratamos como falha de ligação. */
-    if (!dh_handshake_cliente(&sessao_net)) {
+    if (!dh_handshake_cliente(&sessao_net)) 
+    {
         CLOSE_SOCKET(sessao_net.fd);
         sessao_net.fd = -1;
         return 0;
@@ -443,30 +446,40 @@ int conectar_servidor(struct sockaddr_in *liga_addr) {
  * Timeout de 10s: se o servidor não responder, assume-se ligação perdida.
  * ============================================================================
  */
-static int receber_resposta(char *response_out) {
+static int receber_resposta(char *response_out) 
+{
     char linha[LINHA_MAX];
     fd_set fds;
     struct timeval tv;
 
-    while (1) {
+    while (1) 
+    {
         /* Processar já tudo o que estiver acumulado no buffer antes de
          * voltar a bloquear em select() — pode haver várias linhas juntas */
-        while (extrair_linha(&sessao_net, linha, sizeof(linha))) {
+        while (extrair_linha(&sessao_net, linha, sizeof(linha))) 
+        {
             cesar_decifrar_texto(linha, sessao_net.chave_simetrica);
-            if (strncmp(linha, "RESP:", 5) == 0) {
+            if (strncmp(linha, "RESP:", 5) == 0) 
+            {
                 char conteudo[LINHA_MAX];
                 strncpy(conteudo, linha + 5, sizeof(conteudo) - 1);
                 conteudo[sizeof(conteudo) - 1] = '\0';
                 desescapar_newlines(conteudo);
                 if (response_out) strncpy(response_out, conteudo, BUF_SIZE - 1);
                 return 1;
-            } else if (strncmp(linha, "SYS:", 4) == 0) {
+            } 
+            else if (strncmp(linha, "SYS:", 4) == 0) 
+            {
                 printf("\n \033[1;35m[SISTEMA]\033[0m %s\n", linha + 4);
-            } else if (strncmp(linha, "CHAT:", 5) == 0) {
+            } 
+            else if (strncmp(linha, "CHAT:", 5) == 0) 
+            {
                 char canal[MAX_CANAL_NOME] = "", user[MAX_USERNAME] = "", msg[LINHA_MAX] = "";
                 sscanf(linha + 5, "%31[^:]:%49[^:]:%4000[^\n]", canal, user, msg);
                 printf("\n \033[1;34m[#%s] %s:\033[0m %s\n", canal, user, msg);
-            } else if (strncmp(linha, "DM:", 3) == 0) {
+            } 
+            else if (strncmp(linha, "DM:", 3) == 0) 
+            {
                 char de[MAX_USERNAME] = "", msg[LINHA_MAX] = "";
                 sscanf(linha + 3, "%49[^:]:%4000[^\n]", de, msg);
                 printf("\n \033[1;35m[MENSAGEM]\033[0m %s: %s\n", de, msg);
@@ -479,24 +492,29 @@ static int receber_resposta(char *response_out) {
         tv.tv_sec = 10; tv.tv_usec = 0;
 
         int r = select(sessao_net.fd + 1, &fds, NULL, NULL, &tv);
-        if (r <= 0) {
+        if (r <= 0) 
+        {
             if (response_out) strcpy(response_out, "ERRO: Servidor nao respondeu (timeout).");
             return 0;
         }
 
         char temp[BUF_SIZE];
         int n = (int)read(sessao_net.fd, temp, sizeof(temp));
-        if (n <= 0) {
+        if (n <= 0) 
+        {
             if (response_out) strcpy(response_out, "ERRO: Ligacao ao servidor perdida.");
             CLOSE_SOCKET(sessao_net.fd);
             sessao_net.fd = -1;
             return 0;
         }
 
-        if (sessao_net.buffer_len + (size_t)n < BUF_SIZE) {
+        if (sessao_net.buffer_len + (size_t)n < BUF_SIZE) 
+        {
             memcpy(sessao_net.buffer_entrada + sessao_net.buffer_len, temp, (size_t)n);
             sessao_net.buffer_len += (size_t)n;
-        } else {
+        } 
+        else 
+        {
             sessao_net.buffer_len = 0; /* protecção contra overflow */
         }
     }
@@ -515,16 +533,44 @@ static int receber_resposta(char *response_out) {
  * em main(), e delega a leitura a receber_resposta().
  * ============================================================================
  */
-int call_server(const char *cmd, char *response_out) {
-    if (sessao_net.fd < 0) {
+int call_server(const char *cmd, char *response_out) 
+{
+    if (sessao_net.fd < 0) 
+    {
         if (response_out) strcpy(response_out, "ERRO: Sem ligacao ao servidor.");
         return 0;
     }
-    if (enviar_linha_cifrada(sessao_net.fd, cmd, sessao_net.chave_simetrica) != 0) {
+    if (enviar_linha_cifrada(sessao_net.fd, cmd, sessao_net.chave_simetrica) != 0)
+    {
         if (response_out) strcpy(response_out, "ERRO: Falha ao enviar para o servidor.");
         return 0;
     }
     return receber_resposta(response_out);
+}
+
+/* ============================================================================
+ * FUNÇÃO: sessao_ainda_valida()
+ * ============================================================================
+ *
+ * O servidor pode fechar a nossa ligação a qualquer momento (ex: um admin
+ * elimina/inativa a conta com que estamos autenticados — ver
+ * desconectar_sessao_ativa() no servidor). sessao_net.fd só passa a -1
+ * quando o CLIENTE tenta mesmo ler/escrever no socket e isso falha — por
+ * isso os menus (que só leem o teclado) não notavam sozinhos. Cada loop
+ * de menu chama esto no topo para forçar logout automático assim que a
+ * ligação for detectada como perdida, em vez de continuar a navegar com
+ * uma sessão já sem validade nenhuma do lado do servidor.
+ * ============================================================================
+ */
+void aguardar_enter(void);
+
+int sessao_ainda_valida(void) {
+    if (sessao_net.fd >= 0) return 1;
+    printf("\n \033[1;31m[SISTEMA]\033[0m A sessão terminou (ligação ao servidor perdida).\n");
+    aguardar_enter();
+    current_user[0] = '\0';
+    is_admin = 0;
+    return 0;
 }
 
 
@@ -541,7 +587,8 @@ int call_server(const char *cmd, char *response_out) {
  *
  * ============================================================================
  */
-void print_server_response(const char *res) {
+void print_server_response(const char *res) 
+{
     printf("\n\033[1;32m[SERVIDOR]\033[0m\n%s\n", res);
 }
 
@@ -560,7 +607,8 @@ void print_server_response(const char *res) {
  *
  * ============================================================================
  */
-void aguardar_enter() {
+void aguardar_enter() 
+{
     printf("\n >> Pressione ENTER para continuar...");
     getchar();
 }
@@ -579,7 +627,8 @@ void aguardar_enter() {
  *
  * ============================================================================
  */
-void sugerir_usernames(const char *base) {
+void sugerir_usernames(const char *base) 
+{
     printf("\n Sugestões disponíveis:\n");
     printf(" > %s_2026\n", base);
     printf(" > %s_pt\n", base);
@@ -600,7 +649,8 @@ void sugerir_usernames(const char *base) {
  *
  * ============================================================================
  */
-void tempo_sessao(char *out) {
+void tempo_sessao(char *out) 
+{
     if (login_time == 0) { strcpy(out, "00h:00m"); return; }
     int elapsed = (int)difftime(time(NULL), login_time);
     sprintf(out, "%02dh:%02dm", elapsed/3600, (elapsed%3600)/60);
@@ -633,8 +683,10 @@ void tempo_sessao(char *out) {
  *
  * ============================================================================
  */
-void fluxo_login() {
-    while (1) {
+void fluxo_login() 
+{
+    while (1) 
+    {
         draw_header(0, "LOGIN / AUTENTICAÇÃO");
         char u[50], p[50], cmd[150], res[BUF_SIZE];
 
@@ -644,13 +696,15 @@ void fluxo_login() {
         printf("\n [A VERIFICAR CREDENCIAIS...]\n");
 
         sprintf(cmd, "AUTH %s %s", u, p);
-        if (!call_server(cmd, res)) {
+        if (!call_server(cmd, res)) 
+        {
             printf(" \033[1;31m[ERRO]\033[0m %s\n", res);
             aguardar_enter();
             return;
         }
 
-        if (strncmp(res, "AUTH_SUCCESS", 12) == 0) {
+        if (strncmp(res, "AUTH_SUCCESS", 12) == 0) 
+        {
             /* Autenticação bem-sucedida */
             strcpy(current_user, u);
             is_admin   = (strstr(res, "ADMIN") != NULL);
@@ -659,7 +713,9 @@ void fluxo_login() {
             aguardar_enter();
             return; /* Sair do loop — autenticação concluída com sucesso */
 
-        } else if (strcmp(res, "AUTH_PENDING") == 0) {
+        } 
+        else if (strcmp(res, "AUTH_PENDING") == 0) 
+        {
             /* Utilizador registado mas aguarda aprovação do admin */
             printf("\n \033[1;33m[!] FALHA NO LOGIN:\033[0m\n");
             printf(" A sua conta aguarda aprovação do administrador.\n");
@@ -670,7 +726,9 @@ void fluxo_login() {
             int opt; if (scanf("%d", &opt) != 1) opt = 0; clear_buffer();
             if (opt != 1) return; /* Voltar ao menu principal */
 
-        } else if (strcmp(res, "AUTH_INACTIVE") == 0) {
+        } 
+        else if (strcmp(res, "AUTH_INACTIVE") == 0) 
+        {
             /* Utilizador foi suspenso pelo admin */
             printf("\n \033[1;31m[!] FALHA NO LOGIN:\033[0m\n");
             printf(" A sua conta foi suspensa pelo administrador.\n");
@@ -680,8 +738,9 @@ void fluxo_login() {
             printf(" [ 0 ] Voltar ao Menu Inicial\n\n Escolha: ");
             int opt; if (scanf("%d", &opt) != 1) opt = 0; clear_buffer();
             if (opt != 1) return;
-
-        } else {
+        } 
+        else 
+        {
             /* Credenciais inválidas — mostrar dicas de resolução */
             printf("\n \033[1;31m[!] FALHA NO LOGIN:\033[0m\n");
             printf(" O par Nome/Palavra-passe não coincide.\n\n");
@@ -729,8 +788,10 @@ void fluxo_login() {
  *
  * ============================================================================
  */
-void fluxo_registo() {
-    while (1) {
+void fluxo_registo() 
+{
+    while (1) 
+    {
         draw_header(0, "CRIAR NOVA CONTA (F6)");
         char u[50], p[50], p2[50], email[100], cmd[200], res[BUF_SIZE];
 
@@ -741,7 +802,8 @@ void fluxo_registo() {
         clear_buffer();
 
         /* Validação local: passwords coincidem? */
-        if (strcmp(p, p2) != 0) {
+        if (strcmp(p, p2) != 0) 
+        {
             printf("\n \033[1;31m[ERRO]\033[0m As palavras-passe não coincidem.\n");
             aguardar_enter();
             continue;
@@ -751,7 +813,8 @@ void fluxo_registo() {
         sprintf(cmd, "REGISTER %s %s", u, p);
         call_server(cmd, res);
 
-        if (strncmp(res, "REGISTER_OK", 11) == 0) {
+        if (strncmp(res, "REGISTER_OK", 11) == 0) 
+        {
             printf(" \033[1;32m[OK]\033[0m Dados registados!\n");
             printf("\n----------------------------------------------------\n");
             printf(" \033[1;33m[!] IMPORTANTE:\033[0m\n");
@@ -761,7 +824,9 @@ void fluxo_registo() {
             aguardar_enter();
             return; /* Voltar ao menu principal após registo */
 
-        } else if (strstr(res, "ja esta em uso") != NULL) {
+        } 
+        else if (strstr(res, "ja esta em uso") != NULL) 
+        {
             printf("\n \033[1;31m[ERRO]\033[0m O nome '%s' já se encontra atribuído.\n", u);
             sugerir_usernames(u);
             printf("\n----------------------------------------------------\n");
@@ -769,8 +834,9 @@ void fluxo_registo() {
             printf(" [ 0 ] Voltar ao Menu Inicial\n\n Escolha: ");
             int opt; if (scanf("%d", &opt) != 1) opt = 0; clear_buffer();
             if (opt != 1) return;
-
-        } else {
+        } 
+        else 
+        {
             printf("\n \033[1;31m[ERRO]\033[0m %s\n", res);
             aguardar_enter();
             return;
@@ -791,10 +857,11 @@ void fluxo_registo() {
  */
 void submenu_perfil() {
     while (1) {
+        if (!sessao_ainda_valida()) return;
         draw_header(1, "O Meu Perfil");
         printf(" [DADOS DA CONTA]\n");
         printf(" > Utilizador : %s\n", current_user);
-        printf(" > Função     : USER\n");
+        printf(" > Função     : %s\n", is_admin ? "ADMIN" : "USER");
         printf(" > E-mail     : %s\n", strlen(current_email) > 0 ? current_email : "(não definido)");
         printf(" > Estado     : [ ATIVO ]\n");
         printf("\n----------------------------------------------------\n");
@@ -877,6 +944,7 @@ static int esta_online(const char *user, const char *lista_online)
  */
 void submenu_contactos() {
     while (1) {
+        if (!sessao_ainda_valida()) return;
         draw_header(1, "Lista de Contactos");
         char res[BUF_SIZE], res_online[BUF_SIZE];
         call_server("LIST_ALL", res);
@@ -977,8 +1045,9 @@ void submenu_contactos() {
  */
 void submenu_mensagens() 
 {
-    while (1) 
+    while (1)
     {
+        if (!sessao_ainda_valida()) return;
         draw_header(1, "Gestão de Mensagens (F5)");
         char res[BUF_SIZE];
         call_server("CHECK_INBOX", res);
@@ -1159,6 +1228,10 @@ void submenu_mensagens()
                                 printf(" %50s\033[1;36m[%s]:\033[0m %s\n", "", de, msg);
                             /* mensagens de outros contactos não interrompem esta
                              * conversa — ficam por conta da notificação de não-lidas */
+                        } else if (strncmp(linha_srv, "SYS:", 4) == 0) {
+                            /* ex: conta suspensa/eliminada por um admin — o
+                             * servidor fecha a ligação logo a seguir a isto */
+                            printf("\n \033[1;35m[SISTEMA]\033[0m %s\n", linha_srv + 4);
                         }
                         /* RESP: (confirmação do nosso SEND_MSG) e outras
                          * etiquetas ignoradas aqui — já mostrámos a mensagem
@@ -1338,8 +1411,9 @@ void submenu_canais_user() {
  * ============================================================================
  */
 void menu_utilizador() {
-    while (1) 
+    while (1)
     {
+        if (!sessao_ainda_valida()) return;
         draw_header(1, "Menu Principal");
 
         /* Contar mensagens novas */
@@ -1392,9 +1466,9 @@ void menu_utilizador() {
 }
 
 
-/* ============================================================================
+/* ==================================================================================================================================================================
  * FUNÇÕES ADMIN (admin_*)
- * ============================================================================
+ * ==================================================================================================================================================================
  * 
  * As funções a seguir (admin_*) implementam as operações administrativas
  * (Etapa 2: F7, F8, etc.). Cada uma oferece controlo sobre o sistema.
@@ -1437,6 +1511,7 @@ void admin_echo()
     printf("----------------------------------------------------\n");
 
     while (1) {
+        if (!sessao_ainda_valida()) return;
         char msg[400], cmd[500], res[BUF_SIZE];
         printf(" Mensagem a enviar: "); fgets(msg, 400, stdin);
         msg[strcspn(msg, "\n")] = 0;
@@ -1461,10 +1536,11 @@ void admin_echo()
 *   GESTÃO DE UTILIZADORES
 * =========================================================================================================
 */
-void admin_gestao_utilizadores() 
+void admin_gestao_utilizadores()
 {
-    while (1) 
+    while (1)
     {
+        if (!sessao_ainda_valida()) return;
         draw_header(2, "Gestão de Utilizadores");
         printf(" [ 1 ] Listar Todos os Utilizadores\n");
         printf(" [ 2 ] Utilizadores Pendentes de Aprovação (F7)\n");
@@ -1490,8 +1566,9 @@ void admin_gestao_utilizadores()
         }
         else if (opt == 2) 
         {
-            while (1) 
+            while (1)
             {
+                if (!sessao_ainda_valida()) return;
                 draw_header(2, "Utilizadores Pendentes (F7)");
                 call_server("LIST_PENDING", res);
                 print_server_response(res);
@@ -1607,10 +1684,11 @@ void admin_gestao_utilizadores()
 *   LOGS DO ADMIN
 * =========================================================================================================
 */
-void admin_logs() 
+void admin_logs()
 {
-    while (1) 
+    while (1)
     {
+        if (!sessao_ainda_valida()) return;
         draw_header(2, "Logs de Atividade");
         char res[BUF_SIZE], cmd[100];
         strcpy(cmd, "VIEW_LOGS");
@@ -1642,10 +1720,11 @@ void admin_logs()
 *   GESTÃO DE CANAIS
 * =========================================================================================================
 */
-void admin_canais() 
+void admin_canais()
 {
-    while (1) 
+    while (1)
     {
+        if (!sessao_ainda_valida()) return;
         draw_header(2, "Gestão de Canais (F10)");
         printf(" [ 1 ] Listar Todos os Canais\n");
         printf(" [ 2 ] Criar Novo Canal\n");
@@ -1769,10 +1848,11 @@ void admin_canais()
  * resposta tal como veio, já decifrada por call_server().
  * ============================================================================
  */
-void admin_seguranca() 
+void admin_seguranca()
 {
-    while (1) 
+    while (1)
     {
+        if (!sessao_ainda_valida()) return;
         draw_header(2, "Painel de Criptografia (F13/F14)");
         printf(" [ALGORITMOS DISPONÍVEIS NESTA SESSÃO]\n\n");
         printf(" F11 Cifra de sessão   : César generalizada (todo o tráfego)\n");
@@ -1843,8 +1923,8 @@ void admin_seguranca()
             call_server(cmd, res);
             printf("\n");
             print_server_response(res);
-            printf("\n Nota: se mudares um único caractere do texto e repetires,\n");
-            printf(" repara como o hash muda por completo (efeito de avalanche).\n");
+            printf("\n Nota: se se mudar um único caractere do texto e se repetir o processo,\n");
+            printf(" o hash irá alterar por completo (é chamado de efeito de avalanche).\n");
             aguardar_enter();
         }
     }
@@ -1856,10 +1936,11 @@ void admin_seguranca()
 *   ADMIN -> MENU PRINCIPAL
 * =========================================================================================================
 */
-void menu_admin() 
+void menu_admin()
 {
-    while (1) 
+    while (1)
     {
+        if (!sessao_ainda_valida()) return;
         draw_header(2, "Menu Principal");
         printf(" [ 1 ] Monitorização: Detalhes do Servidor (F4)\n");
         printf(" [ 2 ] Diagnóstico: Testar Latência (ECHO)\n");
@@ -1867,6 +1948,7 @@ void menu_admin()
         printf(" [ 4 ] Redes: Gestão de Canais (F10)\n");
         printf(" [ 5 ] Segurança: Painel de Criptografia (F13/F14)\n");
         printf(" [ 6 ] Logs de Atividade\n");
+        printf(" [ 7 ] Ver Perfil / Alterar Password\n");
         printf("\n [ 9 ] Terminar Sessão\n");
         printf(" [ 0 ] Terminar Ligação\n");
         printf("----------------------------------------------------\n Escolha: ");
@@ -1900,6 +1982,7 @@ void menu_admin()
             case 4: admin_canais();               break;
             case 5: admin_seguranca();            break;
             case 6: admin_logs();                 break;
+            case 7: submenu_perfil();             break;
         }
     }
 }
