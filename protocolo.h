@@ -56,6 +56,7 @@
 #define INBOX_FILE      "inbox.txt"
 #define LOG_FILE        "logs.txt"
 #define MAX_USERS_FICHEIRO 200   /* limite de linhas lidas de users.txt em memória (reescrita) */
+#define MAX_INBOX_FICHEIRO 500   /* limite de linhas lidas de inbox.txt em memória (reescrita) */
 
 #define CANAL_OMISSAO   "geral"   /* canal por defeito ao autenticar */
 

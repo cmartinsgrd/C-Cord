@@ -28,10 +28,12 @@ int  proximo_id(void);
 int  check_auth(const char *username, const char *password, char *role);
 int  is_admin(const char *username);
 int  obter_id_por_username(const char *username);
+int  obter_username_por_id(int id_alvo, char *username_out);
 
 void list_all(char *response);
 void list_pending(char *response);
 void check_inbox(const char *username, char *response);
+void get_conversation(const char *me, const char *partner, char *response);
 void send_msg(const char *dest, const char *from, const char *msg, char *response);
 void register_user(const char *username, const char *password, char *response);
 void update_password(const char *username, const char *nova_password, char *response);

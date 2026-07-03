@@ -144,6 +144,33 @@ int obter_id_por_username(const char *username) {
 
 
 
+/* ============================================================================
+ * FUNÇÃO: obter_username_por_id()
+ * ============================================================================
+ *
+ * Inverso de obter_id_por_username(): devolve 1 e escreve o username em
+ * username_out se existir um utilizador com o ID dado, ou devolve 0 caso
+ * contrário. Usado para resolver o ID escolhido pelo utilizador na lista
+ * de contactos para o username exigido por SEND_MSG.
+ * ============================================================================
+ */
+int obter_username_por_id(int id_alvo, char *username_out) {
+    FILE *f = fopen(USERS_FILE, "r");
+    if (!f) return 0;
+    char line[256], id[10], u[50], p[50], r[20], s[20];
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%19[^:]:%19s", id, u, p, r, s) == 5) {
+            if (atoi(id) == id_alvo) {
+                fclose(f);
+                strcpy(username_out, u);
+                return 1;
+            }
+        }
+    }
+    fclose(f);
+    return 0;
+}
+
 void list_all(char *response) {
     FILE *f = fopen(USERS_FILE, "r");
     if (!f) { strcpy(response, "ERRO: Ficheiro de utilizadores nao encontrado."); return; }
@@ -212,20 +239,77 @@ void list_pending(char *response)
 
 
 
+/* ============================================================================
+ * FUNÇÃO: get_conversation()
+ * ============================================================================
+ *
+ * Devolve o histórico bidirecional entre 'me' e 'partner': cada linha do
+ * inbox.txt (formato ESTADO:dest:from:msg — ESTADO = NOVA/LIDA, ver
+ * send_msg()) é classificada como enviada por mim ("S:msg") ou recebida do
+ * outro ("R:msg"), preservando a ordem cronológica em que foram gravadas
+ * (o ficheiro é sempre append-only).
+ *
+ * Como efeito secundário, marca como LIDA qualquer mensagem NOVA recebida
+ * de 'partner' — abrir a conversa é o que faz a notificação desaparecer
+ * da lista de "mensagens novas" da próxima vez que for consultada.
+ * ============================================================================
+ */
+void get_conversation(const char *me, const char *partner, char *response) {
+    response[0] = '\0';
+    FILE *f = fopen(INBOX_FILE, "r");
+    if (!f) return;
+
+    char linhas[MAX_INBOX_FICHEIRO][512];
+    int  total = 0;
+    while (fgets(linhas[total], sizeof(linhas[total]), f) && total < MAX_INBOX_FICHEIRO) {
+        linhas[total][strcspn(linhas[total], "\n")] = 0;
+        total++;
+    }
+    fclose(f);
+
+    int alterado = 0;
+    for (int i = 0; i < total; i++) {
+        char status[10], dest[50], from[50], msg[400];
+        if (sscanf(linhas[i], "%9[^:]:%49[^:]:%49[^:]:%399[^\n]", status, dest, from, msg) != 4)
+            continue;
+
+        char entry[512];
+        if (strcmp(dest, me) == 0 && strcmp(from, partner) == 0) {
+            sprintf(entry, "R:%s\n", msg);
+            strncat(response, entry, BUF_SIZE - strlen(response) - 1);
+            if (strcmp(status, "NOVA") == 0) {
+                snprintf(linhas[i], sizeof(linhas[i]), "LIDA:%s:%s:%s", dest, from, msg);
+                alterado = 1;
+            }
+        } else if (strcmp(dest, partner) == 0 && strcmp(from, me) == 0) {
+            sprintf(entry, "S:%s\n", msg);
+            strncat(response, entry, BUF_SIZE - strlen(response) - 1);
+        }
+    }
+
+    if (alterado) {
+        f = fopen(INBOX_FILE, "w");
+        if (f) {
+            for (int i = 0; i < total; i++) fprintf(f, "%s\n", linhas[i]);
+            fclose(f);
+        }
+    }
+}
+
 void check_inbox(const char *username, char *response) {
     FILE *f = fopen(INBOX_FILE, "r");
     if (!f) { strcpy(response, "A sua caixa de entrada esta vazia."); return; }
 
     sprintf(response, "=== CAIXA DE ENTRADA DE %s ===\n", username);
-    char line[512], dest[50], from[50], msg[400];
+    char line[512], status[10], dest[50], from[50], msg[400];
     int  count = 0;
 
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\n")] = 0;
-        if (sscanf(line, "%49[^:]:%49[^:]:%399[^\n]", dest, from, msg) == 3) {
+        if (sscanf(line, "%9[^:]:%49[^:]:%49[^:]:%399[^\n]", status, dest, from, msg) == 4) {
             if (strcmp(dest, username) == 0) {
                 char entry[512];
-                sprintf(entry, " [%d] De: %s -> %s\n", ++count, from, msg);
+                sprintf(entry, " [%d] (%s) De: %s -> %s\n", ++count, status, from, msg);
                 strncat(response, entry, BUF_SIZE - strlen(response) - 1);
             }
         }
@@ -256,7 +340,7 @@ void send_msg(const char *dest, const char *from, const char *msg, char *respons
 
     f = fopen(INBOX_FILE, "a");
     if (!f) { strcpy(response, "ERRO: Não foi possível guardar mensagem."); return; }
-    fprintf(f, "%s:%s:%s\n", dest, from, msg);
+    fprintf(f, "NOVA:%s:%s:%s\n", dest, from, msg);
     fclose(f);
     sprintf(response, "MSG_SENT: Mensagem entregue na caixa de %s.", dest);
 }

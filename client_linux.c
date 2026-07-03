@@ -466,6 +466,10 @@ static int receber_resposta(char *response_out) {
                 char canal[MAX_CANAL_NOME] = "", user[MAX_USERNAME] = "", msg[LINHA_MAX] = "";
                 sscanf(linha + 5, "%31[^:]:%49[^:]:%4000[^\n]", canal, user, msg);
                 printf("\n \033[1;34m[#%s] %s:\033[0m %s\n", canal, user, msg);
+            } else if (strncmp(linha, "DM:", 3) == 0) {
+                char de[MAX_USERNAME] = "", msg[LINHA_MAX] = "";
+                sscanf(linha + 3, "%49[^:]:%4000[^\n]", de, msg);
+                printf("\n \033[1;35m[MENSAGEM]\033[0m %s: %s\n", de, msg);
             }
             /* etiquetas desconhecidas são ignoradas em silêncio */
         }
@@ -836,40 +840,70 @@ void submenu_perfil() {
 
 
 /* ============================================================================
+ * FUNÇÃO: esta_online()
+ * ============================================================================
+ *
+ * Verifica se 'user' consta na lista devolvida por LIST_ONLINE (usernames
+ * separados por vírgula, ex: "admin,user1"). Usa strstr com marcadores de
+ * vírgula em vez de strtok porque submenu_contactos() já usa strtok noutro
+ * buffer no mesmo ciclo — strtok não é reentrante, chamá-lo aqui corromperia
+ * o parsing da lista de utilizadores em curso.
+ * ============================================================================
+ */
+static int esta_online(const char *user, const char *lista_online) 
+{
+    char alvo[64], padded[BUF_SIZE];
+    snprintf(alvo, sizeof(alvo), ",%s,", user);
+    snprintf(padded, sizeof(padded), ",%s,", lista_online);
+    return strstr(padded, alvo) != NULL;
+}
+
+/* ============================================================================
  * FUNÇÃO: submenu_contactos()
  * ============================================================================
  *
  * O que esta função faz:
  *   Lista todos os utilizadores (excepto o próprio).
  *   Permite enviar mensagem privada para cada contacto.
- *   Estado de online/offline é simulado (todos offline, só próprio online).
+ *   Estado ONLINE/OFFLINE real, obtido do servidor via LIST_ONLINE (que
+ *   percorre as sessões autenticadas em clientes[]).
  *
  * Para quê é importante:
  *   Interface para descobrir e contactar outros utilizadores.
  *   Etapa 2 = mensagens assíncronas (não em tempo real).
- *   Etapa 3+ = adicionar status real e chat em tempo real.
+ *   Etapa 3+ = status real e chat em tempo real.
  *
  * ============================================================================
  */
 void submenu_contactos() {
     while (1) {
         draw_header(1, "Lista de Contactos");
-        char res[BUF_SIZE];
+        char res[BUF_SIZE], res_online[BUF_SIZE];
         call_server("LIST_ALL", res);
+        call_server("LIST_ONLINE", res_online);
 
-        printf(" Utilizador       | Estado\n");
-        printf("------------------+-----------------\n");
+        printf ("  ID  | Utilizador       | Estado\n");
+        printf ("------+------------------+-----------------\n");
 
         char *linha = strtok(res, "\n");
         int count = 0;
         while (linha != NULL) {
             if (strchr(linha, '|') && !strstr(linha, "ID") && !strstr(linha, "---")) {
-                char u[50] = "", r[20] = "", s[20] = "";
-                if (sscanf(linha, " %*[^|]| %49[^|]| %19[^|]| %19s", u, r, s) >= 1) {
-                    char *end = u + strlen(u) - 1;
+                char id[10] = "", u[50] = "", r[20] = "", s[20] = "";
+                if (sscanf(linha, " %9[^|]| %49[^|]| %19[^|]| %19s", id, u, r, s) >= 2) {
+                    char *end = id + strlen(id) - 1;
+                    while (end > id && *end == ' ') { *end = '\0'; end--; }
+                    end = u + strlen(u) - 1;
                     while (end > u && *end == ' ') { *end = '\0'; end--; }
-                    if (strcmp(u, current_user) != 0) {
-                        printf(" %-17s| [ \033[1;33mOFFLINE\033[0m ]\n", u);
+                    end = r + strlen(r) - 1;
+                    while (end > r && *end == ' ') { *end = '\0'; end--; }
+                    /* Admins não aparecem como contacto — utilizadores não
+                     * podem enviar-lhes mensagens privadas por este menu. */
+                    if (strcmp(u, current_user) != 0 && strcmp(r, "ADMIN") != 0) {
+                        if (esta_online(u, res_online))
+                            printf ("  %-4s| %-17s| [ \033[1;32mONLINE\033[0m  ]\n", id, u);
+                        else
+                            printf ("  %-4s| %-17s| [ \033[1;33mOFFLINE\033[0m ]\n", id, u);
                         count++;
                     }
                 }
@@ -890,22 +924,34 @@ void submenu_contactos() {
         if (opt == 2) continue;
 
         if (opt == 1) {
-            draw_header(1, "Enviar Mensagem Privada");
-            char dest[50], msg[400], cmd[500], res2[BUF_SIZE];
-            printf(" Para (Username): "); scanf("%49s", dest); clear_buffer();
-            printf(" Mensagem: ");        fgets(msg, 400, stdin);
-            msg[strcspn(msg, "\n")] = 0;
+            int id_alvo; char cmd[500], res2[BUF_SIZE];
+            printf("\n Para (ID): ");
+            if (scanf("%d", &id_alvo) != 1) { clear_buffer(); aguardar_enter(); continue; }
+            clear_buffer();
 
-            printf("\n [A VERIFICAR UTILIZADOR...]\n");
-            sprintf(cmd, "SEND_MSG %s %s", dest, msg);
+            sprintf(cmd, "CHECK_USER_ID %d", id_alvo);
             call_server(cmd, res2);
 
-            if (strncmp(res2, "MSG_SENT", 8) == 0) {
-                printf(" \033[1;32m[OK]\033[0m Mensagem enviada com sucesso!\n");
-            } else if (strstr(res2, "nao encontrado")) {
-                printf(" \033[1;31m[!]\033[0m Utilizador '%s' não encontrado.\n", dest);
+            if (strncmp(res2, "USER_ID_FOUND:", 14) == 0) {
+                char dest[50]; strncpy(dest, res2 + 14, sizeof(dest) - 1); dest[sizeof(dest) - 1] = '\0';
+                char msg[400];
+                printf(" Mensagem: "); fgets(msg, 400, stdin);
+                msg[strcspn(msg, "\n")] = 0;
+
+                sprintf(cmd, "SEND_MSG %s %s", dest, msg);
+                call_server(cmd, res2);
+
+                if (strncmp(res2, "MSG_SENT", 8) == 0) {
+                    printf("\n \033[1;32m[OK]\033[0m Mensagem enviada com sucesso!\n");
+                } else {
+                    printf("\n \033[1;31m[ERRO]\033[0m %s\n", res2);
+                }
+            } else if (strncmp(res2, "USER_ID_SELF", 12) == 0) {
+                printf("\n \033[1;31m[!]\033[0m Não podes enviar uma mensagem a ti próprio.\n");
+            } else if (strncmp(res2, "USER_ID_ADMIN", 13) == 0) {
+                printf("\n \033[1;31m[!]\033[0m Não podes enviar mensagens privadas a um administrador.\n");
             } else {
-                printf(" \033[1;31m[ERRO]\033[0m %s\n", res2);
+                printf("\n \033[1;31m[!]\033[0m ID '%d' não encontrado.\n", id_alvo);
             }
             aguardar_enter();
         }
@@ -929,8 +975,10 @@ void submenu_contactos() {
  *
  * ============================================================================
  */
-void submenu_mensagens() {
-    while (1) {
+void submenu_mensagens() 
+{
+    while (1) 
+    {
         draw_header(1, "Gestão de Mensagens (F5)");
         char res[BUF_SIZE];
         call_server("CHECK_INBOX", res);
@@ -955,28 +1003,32 @@ void submenu_mensagens() {
         char res_copia[BUF_SIZE];
         strcpy(res_copia, res);
         char *linha = strtok(res_copia, "\n");
-        while (linha != NULL) {
-            if (strstr(linha, "De:")) {
-                char from[50] = "";
+        while (linha != NULL) 
+        {
+            if (strstr(linha, "De:"))
+            {
+                char from[50] = "", status[10] = "";
                 char *ptr = strstr(linha, "De:");
                 if (ptr) {
                     sscanf(ptr + 3, " %49s", from);
-                    char *bar = strchr(from, '|');
-                    if (bar) *bar = 0;
                     char *end = from + strlen(from) - 1;
                     while (end > from && *end == ' ') { *end = '\0'; end--; }
+
+                    char *par = strstr(linha, "(");
+                    if (par) sscanf(par, "(%9[^)])", status);
+                    int e_nova = (strcmp(status, "NOVA") == 0);
 
                     int existe = 0;
                     for (int i = 0; i < num_conv; i++) {
                         if (strcmp(remetentes[i], from) == 0) {
-                            novas[i]++;
+                            if (e_nova) novas[i]++;
                             existe = 1;
                             break;
                         }
                     }
                     if (!existe && num_conv < 20) {
                         strcpy(remetentes[num_conv], from);
-                        novas[num_conv] = 1;
+                        novas[num_conv] = e_nova ? 1 : 0;
                         num_conv++;
                     }
                 }
@@ -1007,58 +1059,112 @@ void submenu_mensagens() {
         int idx = atoi(escolha) - 1;
         if (idx < 0 || idx >= num_conv) continue;
 
-        /* Abrir conversa com remetentes[idx] */
-        while (1) {
-            draw_header(1, "");
-            printf(" CONVERSA COM: \033[1;33m%s\033[0m\n", remetentes[idx]);
-            printf("====================================================\n\n");
+        /* Abrir conversa com remetentes[idx], em tempo real: enviadas à
+         * esquerda, recebidas à direita. As mensagens que chegarem entretanto
+         * (tag DM:, empurrada pelo servidor em SEND_MSG) aparecem na hora,
+         * sem ser preciso voltar a este menu. */
+        {
+            char partner[50]; strcpy(partner, remetentes[idx]);
 
-            char res2[BUF_SIZE];
-            call_server("CHECK_INBOX", res2);
+            draw_header(1, "");
+            printf(" CONVERSA COM: \033[1;33m%s\033[0m\n", partner);
+            printf("====================================================\n");
+            printf(" (escreve a mensagem e Enter para enviar | /sair para voltar)\n");
+            printf("----------------------------------------------------\n\n");
+
+            char cmd[500], res2[BUF_SIZE];
+            sprintf(cmd, "GET_CONVERSATION %s", partner);
+            call_server(cmd, res2);
 
             char *l = strtok(res2, "\n");
             while (l != NULL) {
-                if (strstr(l, "De:")) {
-                    char from[50] = "", msg[400] = "";
-                    char *ptr = strstr(l, "De:");
-                    if (ptr) {
-                        sscanf(ptr + 3, " %49s", from);
-                        char *bar = strchr(from, '|');
-                        if (bar) {
-                            *bar = 0;
-                            strncpy(msg, bar + 2, 399);
-                        }
-                        char *end = from + strlen(from) - 1;
-                        while (end > from && *end == ' ') { *end = '\0'; end--; }
-
-                        if (strcmp(from, remetentes[idx]) == 0) {
-                            printf(" %50s\033[1;36m[%s]:\033[0m\n", "", from);
-                            printf(" %50s%s\n\n", "", msg);
-                        }
-                    }
-                }
+                if (l[0] == 'S' && l[1] == ':')
+                    printf(" \033[1;32m[Tu]:\033[0m %s\n", l + 2);
+                else if (l[0] == 'R' && l[1] == ':')
+                    printf(" %50s\033[1;36m[%s]:\033[0m %s\n", "", partner, l + 2);
                 l = strtok(NULL, "\n");
             }
 
-            printf("----------------------------------------------------\n");
-            printf(" [ 1 ] Responder\n");
-            printf(" [ 0 ] Voltar à lista de conversas\n\n Escolha: ");
+            char linha_entrada[LINHA_MAX];
+            while (1) {
+                if (sessao_net.fd < 0) {
+                    printf("\n \033[1;31m[ERRO]\033[0m Sem ligação ao servidor.\n");
+                    aguardar_enter();
+                    return;
+                }
 
-            int opt; if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }
-            clear_buffer();
-            if (opt == 0) break;
+                fd_set fds;
+                FD_ZERO(&fds);
+                FD_SET(STDIN_FILENO, &fds);
+                FD_SET(sessao_net.fd, &fds);
+                int maxfd = (sessao_net.fd > STDIN_FILENO) ? sessao_net.fd : STDIN_FILENO;
 
-            if (opt == 1) {
-                char msg_reply[400], cmd_r[500], res_r[BUF_SIZE];
-                printf("\n Mensagem: "); fgets(msg_reply, 400, stdin);
-                msg_reply[strcspn(msg_reply, "\n")] = 0;
-                sprintf(cmd_r, "SEND_MSG %s %s", remetentes[idx], msg_reply);
-                call_server(cmd_r, res_r);
-                if (strncmp(res_r, "MSG_SENT", 8) == 0)
-                    printf(" \033[1;32m[OK]\033[0m Resposta enviada!\n");
-                else
-                    printf(" \033[1;31m[ERRO]\033[0m %s\n", res_r);
-                SLEEP_SEC(1);
+                fflush(stdout);
+                if (select(maxfd + 1, &fds, NULL, NULL, NULL) < 0) continue;
+
+                /* --- Utilizador escreveu algo --- */
+                if (FD_ISSET(STDIN_FILENO, &fds)) {
+                    if (!fgets(linha_entrada, sizeof(linha_entrada), stdin)) continue;
+                    linha_entrada[strcspn(linha_entrada, "\n")] = '\0';
+
+                    if (strlen(linha_entrada) == 0) {
+                        continue;
+                    } else if (strcmp(linha_entrada, "/sair") == 0) {
+                        /* marca como lidas quaisquer mensagens chegadas ao vivo
+                         * (tag DM:) durante esta conversa — get_conversation()
+                         * faz isso como efeito secundário; resposta ignorada */
+                        sprintf(cmd, "GET_CONVERSATION %s", partner);
+                        call_server(cmd, res2);
+                        break;
+                    } else {
+                        char cmd_msg[LINHA_MAX + 64];
+                        snprintf(cmd_msg, sizeof(cmd_msg), "SEND_MSG %s %s", partner, linha_entrada);
+                        enviar_linha_cifrada(sessao_net.fd, cmd_msg, sessao_net.chave_simetrica);
+                        /* mostra-se já aqui a nossa mensagem, tal como no
+                         * modo de canais — o servidor não a ecoa de volta.
+                         * Sobe-se uma linha e limpa-se para a linha crua que
+                         * o terminal já ecoou dar lugar à versão formatada. */
+                        printf("\033[1A\r\033[K \033[1;32m[Tu]:\033[0m %s\n", linha_entrada);
+                    }
+                }
+
+                /* --- Chegaram dados do servidor --- */
+                if (FD_ISSET(sessao_net.fd, &fds)) {
+                    char temp[BUF_SIZE];
+                    int n = (int)read(sessao_net.fd, temp, sizeof(temp));
+
+                    if (n <= 0) {
+                        printf("\n \033[1;31m[ERRO]\033[0m Ligação ao servidor perdida.\n");
+                        CLOSE_SOCKET(sessao_net.fd);
+                        sessao_net.fd = -1;
+                        aguardar_enter();
+                        return;
+                    }
+
+                    if (sessao_net.buffer_len + (size_t)n < BUF_SIZE) {
+                        memcpy(sessao_net.buffer_entrada + sessao_net.buffer_len, temp, (size_t)n);
+                        sessao_net.buffer_len += (size_t)n;
+                    } else {
+                        sessao_net.buffer_len = 0;
+                    }
+
+                    char linha_srv[LINHA_MAX];
+                    while (extrair_linha(&sessao_net, linha_srv, sizeof(linha_srv))) {
+                        cesar_decifrar_texto(linha_srv, sessao_net.chave_simetrica);
+
+                        if (strncmp(linha_srv, "DM:", 3) == 0) {
+                            char de[50] = "", msg[LINHA_MAX] = "";
+                            sscanf(linha_srv + 3, "%49[^:]:%4000[^\n]", de, msg);
+                            if (strcmp(de, partner) == 0)
+                                printf(" %50s\033[1;36m[%s]:\033[0m %s\n", "", de, msg);
+                            /* mensagens de outros contactos não interrompem esta
+                             * conversa — ficam por conta da notificação de não-lidas */
+                        }
+                        /* RESP: (confirmação do nosso SEND_MSG) e outras
+                         * etiquetas ignoradas aqui — já mostrámos a mensagem
+                         * localmente ao enviar */
+                    }
+                }
             }
         }
     }
@@ -1152,9 +1258,12 @@ void submenu_canais_user() {
                 snprintf(cmd, sizeof(cmd), "CHAT %s", linha_entrada);
                 enviar_linha_cifrada(sessao_net.fd, cmd, sessao_net.chave_simetrica);
                 /* O servidor NÃO ecoa a nossa própria mensagem de volta
-                 * (ver broadcast_canal() no servidor) — mostramo-la já
-                 * aqui localmente para o utilizador ver o que escreveu. */
-                printf(" \033[1;32m[Tu]:\033[0m %s\n", linha_entrada);
+                 * (ver broadcast_canal() no servidor) — mostramo-la já aqui
+                 * localmente. O terminal já ecoou "[#canal]> zzz" ao escrever
+                 * (modo canónico); sobe-se uma linha e limpa-se para essa
+                 * linha crua dar lugar à versão formatada "[Tu]: zzz", em
+                 * vez de aparecerem as duas. */
+                printf("\033[1A\r\033[K \033[1;32m[Tu]:\033[0m %s\n", linha_entrada);
             }
         }
 
@@ -1186,10 +1295,10 @@ void submenu_canais_user() {
                 if (strncmp(linha_srv, "CHAT:", 5) == 0) {
                     char canal_msg[MAX_CANAL_NOME] = "", user[MAX_USERNAME] = "", msg[LINHA_MAX] = "";
                     sscanf(linha_srv + 5, "%31[^:]:%49[^:]:%4000[^\n]", canal_msg, user, msg);
-                    printf(" \033[1;36m[%s]:\033[0m %s\n", user, msg);
+                    printf("\r\033[K \033[1;36m[%s]:\033[0m %s\n", user, msg);
 
                 } else if (strncmp(linha_srv, "SYS:", 4) == 0) {
-                    printf(" \033[1;35m%s\033[0m\n", linha_srv + 4);
+                    printf("\r\033[K \033[1;35m%s\033[0m\n", linha_srv + 4);
 
                 } else if (strncmp(linha_srv, "RESP:", 5) == 0) {
                     char conteudo[LINHA_MAX];
@@ -1205,9 +1314,9 @@ void submenu_canais_user() {
                             strncpy(sessao_net.canal, hash + 1, MAX_CANAL_NOME - 1);
                             sessao_net.canal[MAX_CANAL_NOME - 1] = '\0';
                         }
-                        printf(" \033[1;32m[OK]\033[0m %s\n", conteudo);
+                        printf("\r\033[K \033[1;32m[OK]\033[0m %s\n", conteudo);
                     } else {
-                        printf(" \033[1;33m[SERVIDOR]\033[0m %s\n", conteudo);
+                        printf("\r\033[K \033[1;33m[SERVIDOR]\033[0m %s\n", conteudo);
                     }
                 }
             }
@@ -1238,7 +1347,7 @@ void menu_utilizador() {
         call_server("CHECK_INBOX", res_inbox);
         int novas = 0;
         char *ptr = res_inbox;
-        while ((ptr = strstr(ptr, "De:")) != NULL) { novas++; ptr++; }
+        while ((ptr = strstr(ptr, "(NOVA)")) != NULL) { novas++; ptr++; }
 
         printf(" [ 1 ] Ver Perfil / Alterar Password\n");
         printf(" [ 2 ] Lista de Contactos\n");
@@ -1251,7 +1360,7 @@ void menu_utilizador() {
         printf("\n [ 9 ] Sair da Conta (Logout)\n");
         printf(" [ 0 ] Fechar Aplicação\n");
         if (novas > 0)
-            printf("\n Info: C-Cord v1.1 | Mensagens por ler: \033[1;33m%d\033[0m\n", novas);
+            printf("\n Info: C-Cord v3.1 | Mensagens por ler: \033[1;33m%d\033[0m\n", novas);
         printf("----------------------------------------------------\n Escolha: ");
 
         int opt; if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }
@@ -1360,7 +1469,7 @@ void admin_gestao_utilizadores()
         printf(" [ 1 ] Listar Todos os Utilizadores\n");
         printf(" [ 2 ] Utilizadores Pendentes de Aprovação (F7)\n");
         printf(" [ 3 ] Ativar / Inativar Conta\n");
-        printf(" [ 4 ] Remover Utilizador Permanente (F8)\n");
+        printf(" [ 4 ] Remover Utilizador permanentemente (F8)\n");
         printf("\n [ 0 ] Voltar ao Menu Principal\n\n Escolha: ");
 
         int opt; if (scanf("%d", &opt) != 1) { clear_buffer(); continue; }

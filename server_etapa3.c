@@ -215,9 +215,21 @@ static void processar_comando(int indice, char *linha)
         log_type = 0;
     }
     /* ---- LIST_PENDING ---- */
-    else if (strcmp(linha, "LIST_PENDING") == 0) 
+    else if (strcmp(linha, "LIST_PENDING") == 0)
     {
         list_pending(resposta);
+        log_type = 0;
+    }
+    /* ---- LIST_ONLINE (usernames autenticados neste momento, separados por vírgula) ---- */
+    else if (strcmp(linha, "LIST_ONLINE") == 0)
+    {
+        resposta[0] = '\0';
+        for (int i = 0; i < MAX_CLIENTS; i++)
+        {
+            if (clientes[i].fd == -1 || !clientes[i].autenticado) continue;
+            if (resposta[0] != '\0') strcat(resposta, ",");
+            strcat(resposta, clientes[i].username);
+        }
         log_type = 0;
     }
     /* ---- CHECK_INBOX (username vem da sessão, já não é parâmetro) ---- */
@@ -226,12 +238,52 @@ static void processar_comando(int indice, char *linha)
         check_inbox(cli->username, resposta);
         log_type = 0;
     }
+    /* ---- GET_CONVERSATION <partner>  (historico bidirecional com 'partner') ---- */
+    else if (strncmp(linha, "GET_CONVERSATION ", 17) == 0)
+    {
+        char partner[50] = "";
+        sscanf(linha + 17, "%49s", partner);
+        get_conversation(cli->username, partner, resposta);
+        log_type = 0;
+    }
+    /* ---- CHECK_USER_ID <id>  (existe conta com este ID? devolve o username) ---- */
+    else if (strncmp(linha, "CHECK_USER_ID ", 14) == 0)
+    {
+        int alvo_id = atoi(linha + 14);
+        char username_alvo[50] = "";
+        if (!obter_username_por_id(alvo_id, username_alvo))
+            strcpy(resposta, "USER_ID_NOT_FOUND");
+        else if (strcmp(username_alvo, cli->username) == 0)
+            strcpy(resposta, "USER_ID_SELF");
+        else if (is_admin(username_alvo))
+            strcpy(resposta, "USER_ID_ADMIN");
+        else
+            sprintf(resposta, "USER_ID_FOUND:%s", username_alvo);
+        log_type = 0;
+    }
     /* ---- SEND_MSG <dest> <msg>  (from = sessão actual) ---- */
-    else if (strncmp(linha, "SEND_MSG ", 9) == 0) 
+    else if (strncmp(linha, "SEND_MSG ", 9) == 0)
     {
         char dest[50] = "", msg[400] = "";
         sscanf(linha + 9, "%49s %399[^\n]", dest, msg);
         send_msg(dest, cli->username, msg, resposta);
+
+        /* Se o destinatario estiver ligado agora, empurra-se a mensagem de
+         * imediato (tag DM) para a conversa em tempo real — o inbox.txt
+         * guardado por send_msg() continua a ser a fonte de verdade para
+         * quando o destinatario nao esta online ou reabre a conversa mais tarde. */
+        if (strncmp(resposta, "MSG_SENT", 8) == 0)
+        {
+            for (int i = 0; i < MAX_CLIENTS; i++)
+            {
+                if (clientes[i].fd == -1 || !clientes[i].autenticado) continue;
+                if (strcmp(clientes[i].username, dest) != 0) continue;
+                char dm_conteudo[460];
+                snprintf(dm_conteudo, sizeof(dm_conteudo), "%s:%s", cli->username, msg);
+                enviar_tagged_cifrada(clientes[i].fd, "DM", dm_conteudo, clientes[i].chave_simetrica);
+                break;
+            }
+        }
         sprintf(log_msg, "SEND_MSG: de '%s' para '%s'", cli->username, dest); log_type = 1;
     }
     /* ---- APPROVE_USER <target> ---- */
